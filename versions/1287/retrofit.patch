@@ -1,0 +1,499 @@
+diff --git a/simplified/lowarn-version-xmonad-v1287.cabal b/retrofitted/lowarn-version-xmonad-v1287.cabal
+index a7739a2..21261f2 100644
+--- a/simplified/lowarn-version-xmonad-v1287.cabal
++++ b/retrofitted/lowarn-version-xmonad-v1287.cabal
+@@ -58,6 +58,9 @@ library
+                    XMonad.ManageHook
+                    XMonad.Operations
+                    XMonad.StackSet
++                   XMonad.LowarnState
++                   EntryPoint_xmonad
++                   RuntimeDataVar_xmonad
+   other-modules:   Paths_lowarn_version_xmonad_v1287
+   hs-source-dirs:  src
+   build-depends:   base                  >= 4.9 && < 5
+@@ -72,8 +75,13 @@ library
+                  , setlocale
+                  , unix
+                  , utf8-string           >= 0.3 && < 1.1
+-  ghc-options:     -funbox-strict-fields -Wall -fno-warn-unused-do-bind
++                 , lowarn
++                 , lowarn-inject
++                 , lowarn-transformer
++  ghc-options:     -funbox-strict-fields -Wall -fno-warn-unused-do-bind -F -pgmF=lowarn-inject -optF=xmonad
+   default-language: Haskell2010
++  default-extensions: DeriveGeneric, DeriveAnyClass
++  build-tool-depends: lowarn-inject:lowarn-inject
+ 
+   if flag(testing)
+     buildable: False
+diff --git a/retrofitted/src/EntryPoint_xmonad.hs b/retrofitted/src/EntryPoint_xmonad.hs
+new file mode 100644
+index 0000000..5b46ab1
+--- /dev/null
++++ b/retrofitted/src/EntryPoint_xmonad.hs
+@@ -0,0 +1,21 @@
++{-# LANGUAGE TemplateHaskell #-}
++
++module EntryPoint_xmonad (entryPoint) where
++
++import Data.Maybe
++import Lowarn
++import Lowarn.TH
++import Lowarn.Inject
++import System.IO
++import XMonad
++import XMonad.LowarnState
++
++entryPoint :: EntryPoint LowarnState
++entryPoint = EntryPoint $
++  \runtimeData -> do
++    injectRuntimeData runtimeData
++    case lastState runtimeData of
++      Nothing -> lowarnLaunch def
++      Just lowarnState -> lowarnResume lowarnState
++
++entryPointExportDeclarations 'entryPoint
+diff --git a/retrofitted/src/RuntimeDataVar_xmonad.hs b/retrofitted/src/RuntimeDataVar_xmonad.hs
+new file mode 100644
+index 0000000..07a0fd9
+--- /dev/null
++++ b/retrofitted/src/RuntimeDataVar_xmonad.hs
+@@ -0,0 +1,3 @@
++module RuntimeDataVar_xmonad () where
++
++{- RUNTIME_DATA_VAR {-# SOURCE #-} XMonad.LowarnState (LowarnState) -}
+diff --git a/simplified/src/XMonad/Core.hs b/retrofitted/src/XMonad/Core.hs
+index 96a9878..4616abf 100644
+--- a/simplified/src/XMonad/Core.hs
++++ b/retrofitted/src/XMonad/Core.hs
+@@ -1,5 +1,6 @@
+ {-# LANGUAGE ExistentialQuantification, FlexibleInstances, GeneralizedNewtypeDeriving,
+-             MultiParamTypeClasses, TypeSynonymInstances, DeriveDataTypeable #-}
++             MultiParamTypeClasses, TypeSynonymInstances, DeriveDataTypeable,
++             DerivingStrategies #-}
+ 
+ -----------------------------------------------------------------------------
+ -- |
+@@ -64,6 +65,9 @@ import System.Environment (lookupEnv)
+ import qualified Data.Map as M
+ import qualified Data.Set as S
+ 
++import Lowarn.Transformer (Generic, HasDatatypeInfo)
++import qualified GHC.Generics as GHC (Generic)
++
+ -- | XState, the (mutable) window manager state.
+ data XState = XState
+     { windowset        :: !WindowSet                     -- ^ workspace list
+@@ -77,6 +81,7 @@ data XState = XState
+     -- The module "XMonad.Util.ExtensibleState" in xmonad-contrib
+     -- provides additional information and a simple interface for using this.
+     }
++    deriving (GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ -- | XConf, the (read-only) window manager configuration.
+ data XConf = XConf
+@@ -96,6 +101,7 @@ data XConf = XConf
+     , currentEvent :: !(Maybe Event)
+                                       -- ^ event currently being processed
+     }
++    deriving (GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ -- todo, better name
+ data XConfig l = XConfig
+@@ -123,7 +129,7 @@ data XConfig l = XConfig
+     , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
+                                                  -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
+     }
+-
++    deriving (GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
+ type WindowSpace = Workspace WorkspaceId (Layout Window) Window
+@@ -132,10 +138,13 @@ type WindowSpace = Workspace WorkspaceId (Layout Window) Window
+ type WorkspaceId = String
+ 
+ -- | Physical screen indices
+-newtype ScreenId    = S Int deriving (Eq,Ord,Show,Read,Enum,Num,Integral,Real)
++newtype ScreenId    = S Int deriving newtype (Eq,Ord,Show,Read,Enum,Num,Integral,Real)
++    deriving stock (GHC.Generic)
++    deriving anyclass (Generic, HasDatatypeInfo)
++
+ 
+ -- | The 'Rectangle' with screen dimensions
+-data ScreenDetail   = SD { screenRect :: !Rectangle } deriving (Eq,Show, Read)
++data ScreenDetail   = SD { screenRect :: !Rectangle } deriving (Eq,Show, Read, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ ------------------------------------------------------------------------
+ 
+@@ -148,7 +157,8 @@ data ScreenDetail   = SD { screenRect :: !Rectangle } deriving (Eq,Show, Read)
+ -- instantiated on 'XConf' and 'XState' automatically.
+ --
+ newtype X a = X (ReaderT XConf (StateT XState IO) a)
+-    deriving (Functor, Monad, MonadFail, MonadIO, MonadState XState, MonadReader XConf, Typeable)
++    deriving stock (Typeable)
++    deriving newtype (Functor, Monad, MonadFail, MonadIO, MonadState XState, MonadReader XConf)
+ 
+ instance Applicative X where
+   pure = return
+@@ -166,7 +176,7 @@ instance Default a => Default (X a) where
+ 
+ type ManageHook = Query (Endo WindowSet)
+ newtype Query a = Query (ReaderT Window X a)
+-    deriving (Functor, Applicative, Monad, MonadReader Window, MonadIO)
++    deriving newtype (Functor, Applicative, Monad, MonadReader Window, MonadIO)
+ 
+ runQuery :: Query a -> Window -> X a
+ runQuery (Query m) w = runReaderT m w
+diff --git a/simplified/src/XMonad/Layout.hs b/retrofitted/src/XMonad/Layout.hs
+index c519667..a071756 100644
+--- a/simplified/src/XMonad/Layout.hs
++++ b/retrofitted/src/XMonad/Layout.hs
+@@ -32,19 +32,24 @@ import Control.Arrow ((***), second)
+ import Control.Monad
+ import Data.Maybe (fromMaybe)
+ 
++import Lowarn.Transformer (Generic, HasDatatypeInfo)
++import qualified GHC.Generics as GHC (Generic)
++
+ ------------------------------------------------------------------------
+ 
+ -- | Change the size of the master pane.
+-data Resize     = Shrink | Expand   deriving Typeable
++data Resize     = Shrink | Expand
++    deriving (Typeable, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ -- | Increase the number of clients in the master pane.
+-data IncMasterN = IncMasterN !Int    deriving Typeable
++data IncMasterN = IncMasterN !Int
++    deriving (Typeable, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ instance Message Resize
+ instance Message IncMasterN
+ 
+ -- | Simple fullscreen mode. Renders the focused window fullscreen.
+-data Full a = Full deriving (Show, Read)
++data Full a = Full deriving (Show, Read, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ instance LayoutClass Full a
+ 
+@@ -54,7 +59,7 @@ data Tall a = Tall { tallNMaster :: !Int               -- ^ The default number o
+                    , tallRatioIncrement :: !Rational   -- ^ Percent of screen to increment by when resizing panes (default: 3/100)
+                    , tallRatio :: !Rational            -- ^ Default proportion of screen occupied by master pane (default: 1/2)
+                    }
+-                deriving (Show, Read)
++                deriving (Show, Read, GHC.Generic, Generic, HasDatatypeInfo)
+                         -- TODO should be capped [0..1] ..
+ 
+ -- a nice pure layout, lots of properties for the layout, and its messages, in Properties.hs
+@@ -115,7 +120,7 @@ splitVerticallyBy f = (mirrorRect *** mirrorRect) . splitHorizontallyBy f . mirr
+ ------------------------------------------------------------------------
+ 
+ -- | Mirror a layout, compute its 90 degree rotated form.
+-newtype Mirror l a = Mirror (l a) deriving (Show, Read)
++newtype Mirror l a = Mirror (l a) deriving (Show, Read, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ instance LayoutClass l a => LayoutClass (Mirror l) a where
+     runLayout (W.Workspace i (Mirror l) ms) r = (map (second mirrorRect) *** fmap Mirror)
+@@ -132,7 +137,7 @@ mirrorRect (Rectangle rx ry rw rh) = Rectangle ry rx rh rw
+ -- Layouts that transition between other layouts
+ 
+ -- | Messages to change the current layout.
+-data ChangeLayout = FirstLayout | NextLayout deriving (Eq, Show, Typeable)
++data ChangeLayout = FirstLayout | NextLayout deriving (Eq, Show, Typeable, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ instance Message ChangeLayout
+ 
+@@ -142,12 +147,12 @@ instance Message ChangeLayout
+ infixr 5 |||
+ 
+ -- | A layout that allows users to switch between various layout options.
+-data Choose l r a = Choose LR (l a) (r a) deriving (Read, Show)
++data Choose l r a = Choose LR (l a) (r a) deriving (Read, Show, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+--- | Sets the current sub-layout (left or right) in 'Choose'.
+-data LR = L | R deriving (Read, Show, Eq)
++-- | Choose the current sub-layout (left or right) in 'Choose'.
++data LR = L | R deriving (Read, Show, Eq, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+-data NextNoWrap = NextNoWrap deriving (Eq, Show, Typeable)
++data NextNoWrap = NextNoWrap deriving (Eq, Show, Typeable, GHC.Generic, Generic, HasDatatypeInfo)
+ instance Message NextNoWrap
+ 
+ -- | A small wrapper around handleMessage, as it is tedious to write
+diff --git a/retrofitted/src/XMonad/LowarnState.hs b/retrofitted/src/XMonad/LowarnState.hs
+new file mode 100644
+index 0000000..ab6e654
+--- /dev/null
++++ b/retrofitted/src/XMonad/LowarnState.hs
+@@ -0,0 +1,11 @@
++module XMonad.LowarnState (LowarnState (..)) where
++
++import XMonad.Core
++import Lowarn.Transformer (Generic, HasDatatypeInfo)
++import qualified GHC.Generics as GHC (Generic)
++
++data LowarnState = LowarnState {
++  lowarnStateXState :: XState,
++  lowarnStateXConf :: XConf
++}
++  deriving (GHC.Generic, Generic, HasDatatypeInfo)
+diff --git a/retrofitted/src/XMonad/LowarnState.hs-boot b/retrofitted/src/XMonad/LowarnState.hs-boot
+new file mode 100644
+index 0000000..2f57029
+--- /dev/null
++++ b/retrofitted/src/XMonad/LowarnState.hs-boot
+@@ -0,0 +1,3 @@
++module XMonad.LowarnState (LowarnState) where
++
++data LowarnState
+diff --git a/simplified/src/XMonad/Main.hs b/retrofitted/src/XMonad/Main.hs
+index ed82407..6475feb 100644
+--- a/simplified/src/XMonad/Main.hs
++++ b/retrofitted/src/XMonad/Main.hs
+@@ -13,7 +13,7 @@
+ --
+ -----------------------------------------------------------------------------
+ 
+-module XMonad.Main (xmonad, launch) where
++module XMonad.Main (xmonad, launch, lowarnLaunch, lowarnResume) where
+ 
+ import System.Locale.SetLocale
+ import qualified Control.Exception.Extensible as E
+@@ -49,6 +49,10 @@ import Data.Version (showVersion)
+ 
+ import Graphics.X11.Xinerama (compiledWithXinerama)
+ 
++import XMonad.LowarnState
++import Lowarn
++import Lowarn.Inject
++
+ ------------------------------------------------------------------------
+ 
+ 
+@@ -146,28 +150,8 @@ sendReplace = do
+     rootw  <- rootWindow dpy dflt
+     replace dpy dflt rootw
+ 
+--- | Entry point into xmonad for custom builds.
+---
+--- This function isn't meant to be called by the typical xmonad user
+--- because it:
+---
+---   * Does not process any command line arguments.
+---
+---   * Therefore doesn't know how to restart a running xmonad.
+---
+---   * Does not compile your configuration file since it assumes it's
+---     actually running from within your compiled configuration.
+---
+--- Unless you know what you are doing, you should probably be using
+--- the 'xmonad' function instead.
+---
+--- However, if you are using a custom build environment (such as
+--- stack, cabal, make, etc.) you will likely want to call this
+--- function instead of 'xmonad'.  You probably also want to have a key
+--- binding to the 'XMonad.Operations.restart` function that restarts
+--- your custom binary with the resume flag set to @True@.
+-launch :: (LayoutClass l Window, Read (l Window)) => XConfig l -> IO ()
+-launch initxmc = do
++lowarnLaunch :: (LayoutClass l Window, Read (l Window)) => XConfig l -> IO LowarnState
++lowarnLaunch initxmc = do
+     -- setup locale information from environment
+     setLocale LC_ALL (Just "")
+     -- ignore SIGPIPE and SIGCHLD
+@@ -226,46 +210,59 @@ launch initxmc = do
+             , dragging        = Nothing
+             , extensibleState = M.empty
+             }
++    (_, endSt) <-
++        allocaXEvent $ \e ->
++            runX cf st $ do
++                -- check for serialized state in a file.
++                serializedSt <- do
++                    path <- stateFileName
++                    exists <- io (doesFileExist path)
++                    if exists then readStateFile initxmc else return Nothing
+ 
+-    allocaXEvent $ \e ->
+-        runX cf st $ do
+-            -- check for serialized state in a file.
+-            serializedSt <- do
+-                path <- stateFileName
+-                exists <- io (doesFileExist path)
+-                if exists then readStateFile initxmc else return Nothing
++                -- restore extensibleState if we read it from a file.
++                let extst = maybe M.empty extensibleState serializedSt
++                modify (\s -> s {extensibleState = extst})
+ 
+-            -- restore extensibleState if we read it from a file.
+-            let extst = maybe M.empty extensibleState serializedSt
+-            modify (\s -> s {extensibleState = extst})
++                setNumlockMask
++                grabKeys
++                grabButtons
+ 
+-            setNumlockMask
+-            grabKeys
+-            grabButtons
++                io $ sync dpy False
+ 
+-            io $ sync dpy False
++                ws <- io $ scan dpy rootw
+ 
+-            ws <- io $ scan dpy rootw
++                -- bootstrap the windowset, Operations.windows will identify all
++                -- the windows in winset as new and set initial properties for
++                -- those windows.  Remove all windows that are no longer top-level
++                -- children of the root, they may have disappeared since
++                -- restarting.
++                let winset = maybe initialWinset windowset serializedSt
++                windows . const . foldr W.delete winset $ W.allWindows winset \\ ws
+ 
+-            -- bootstrap the windowset, Operations.windows will identify all
+-            -- the windows in winset as new and set initial properties for
+-            -- those windows.  Remove all windows that are no longer top-level
+-            -- children of the root, they may have disappeared since
+-            -- restarting.
+-            let winset = maybe initialWinset windowset serializedSt
+-            windows . const . foldr W.delete winset $ W.allWindows winset \\ ws
++                -- manage the as-yet-unmanaged windows
++                mapM_ manage (ws \\ W.allWindows winset)
+ 
+-            -- manage the as-yet-unmanaged windows
+-            mapM_ manage (ws \\ W.allWindows winset)
++                userCode $ startupHook initxmc
+ 
+-            userCode $ startupHook initxmc
++                mainLoop dpy e
+ 
+-            -- main loop, for all you HOF/recursion fans out there.
+-            forever $ prehandle =<< io (nextEvent dpy e >> getEvent e)
++    return $ LowarnState endSt cf
+ 
+-    return ()
++lowarnResume :: LowarnState -> IO LowarnState
++lowarnResume (LowarnState st cf) = do
++    (_, endSt) <- allocaXEvent $ runX cf st . mainLoop dpy
++    return $ LowarnState endSt cf
++      where
++        dpy = display cf
++
++mainLoop :: Display -> XEventPtr -> X ()
++mainLoop d e = do
++    -- main loop, for all you HOF/recursion fans out there.
++    prehandle =<< io (nextEvent d e >> getEvent e)
++    shouldStop <-
++      liftIO $ isUpdateAvailable =<< (injectedRuntimeData :: IO (RuntimeData LowarnState))
++    if shouldStop then return () else mainLoop d e
+       where
+-        -- if the event gives us the position of the pointer, set mousePosition
+         prehandle e = let mouse = do guard (ev_event_type e `elem` evs)
+                                      return (fromIntegral (ev_x_root e)
+                                             ,fromIntegral (ev_y_root e))
+@@ -273,6 +270,28 @@ launch initxmc = do
+         evs = [ keyPress, keyRelease, enterNotify, leaveNotify
+               , buttonPress, buttonRelease]
+ 
++-- | Entry point into xmonad for custom builds.
++--
++-- This function isn't meant to be called by the typical xmonad user
++-- because it:
++--
++--   * Does not process any command line arguments.
++--
++--   * Therefore doesn't know how to restart a running xmonad.
++--
++--   * Does not compile your configuration file since it assumes it's
++--     actually running from within your compiled configuration.
++--
++-- Unless you know what you are doing, you should probably be using
++-- the 'xmonad' function instead.
++--
++-- However, if you are using a custom build environment (such as
++-- stack, cabal, make, etc.) you will likely want to call this
++-- function instead of 'xmonad'.  You probably also want to have a key
++-- binding to the 'XMonad.Operations.restart` function that restarts
++-- your custom binary with the resume flag set to @True@.
++launch :: (LayoutClass l Window, Read (l Window)) => XConfig l -> IO ()
++launch = void . lowarnLaunch
+ 
+ -- | Runs handleEventHook from the configuration and runs the default handler
+ -- function if it returned True.
+diff --git a/simplified/src/XMonad/Operations.hs b/retrofitted/src/XMonad/Operations.hs
+index 29efe1d..0f7f036 100644
+--- a/simplified/src/XMonad/Operations.hs
++++ b/retrofitted/src/XMonad/Operations.hs
+@@ -43,6 +43,9 @@ import Graphics.X11.Xlib
+ import Graphics.X11.Xinerama (getScreenInfo)
+ import Graphics.X11.Xlib.Extras
+ 
++import Lowarn.Transformer (Generic, HasDatatypeInfo)
++import qualified GHC.Generics as GHC (Generic)
++
+ -- ---------------------------------------------------------------------
+ -- |
+ -- Window manager operations
+@@ -469,7 +472,7 @@ initColor dpy c = C.handle (\(C.SomeException _) -> return Nothing) $
+ data StateFile = StateFile
+   { sfWins :: W.StackSet  WorkspaceId String Window ScreenId ScreenDetail
+   , sfExt  :: [(String, String)]
+-  } deriving (Show, Read)
++  } deriving (Show, Read, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ -- | Write the current window state (and extensible state) to a file
+ -- so that xmonad can resume with that state intact.
+diff --git a/simplified/src/XMonad/StackSet.hs b/retrofitted/src/XMonad/StackSet.hs
+index d6077c7..7aee28b 100644
+--- a/simplified/src/XMonad/StackSet.hs
++++ b/retrofitted/src/XMonad/StackSet.hs
+@@ -57,6 +57,9 @@ import qualified Data.List as L (deleteBy,find,splitAt,filter,nub)
+ import Data.List ( (\\) )
+ import qualified Data.Map  as M (Map,insert,delete,empty)
+ 
++import Lowarn.Transformer (Generic, HasDatatypeInfo)
++import qualified GHC.Generics as GHC (Generic)
++
+ -- $intro
+ --
+ -- The 'StackSet' data type encodes a window manager abstraction. The
+@@ -136,23 +139,26 @@ data StackSet i l a sid sd =
+              , visible  :: [Screen i l a sid sd]     -- ^ non-focused workspaces, visible in xinerama
+              , hidden   :: [Workspace i l a]         -- ^ workspaces not visible anywhere
+              , floating :: M.Map a RationalRect      -- ^ floating windows
+-             } deriving (Show, Read, Eq)
++             } deriving (Show, Read, Eq, GHC.Generic, Generic, HasDatatypeInfo)
++
+ 
+ -- | Visible workspaces, and their Xinerama screens.
+ data Screen i l a sid sd = Screen { workspace :: !(Workspace i l a)
+                                   , screen :: !sid
+                                   , screenDetail :: !sd }
+-    deriving (Show, Read, Eq)
++    deriving (Show, Read, Eq, GHC.Generic, Generic, HasDatatypeInfo)
++
+ 
+ -- |
+ -- A workspace is just a tag, a layout, and a stack.
+ --
+ data Workspace i l a = Workspace  { tag :: !i, layout :: l, stack :: Maybe (Stack a) }
+-    deriving (Show, Read, Eq)
++    deriving (Show, Read, Eq, GHC.Generic, Generic, HasDatatypeInfo)
++
+ 
+ -- | A structure for window geometries
+ data RationalRect = RationalRect Rational Rational Rational Rational
+-    deriving (Show, Read, Eq)
++    deriving (Show, Read, Eq, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ -- |
+ -- A stack is a cursor onto a window list.
+@@ -175,7 +181,7 @@ data RationalRect = RationalRect Rational Rational Rational Rational
+ data Stack a = Stack { focus  :: !a        -- focused thing in this set
+                      , up     :: [a]       -- clowns to the left
+                      , down   :: [a] }     -- jokers to the right
+-    deriving (Show, Read, Eq)
++    deriving (Show, Read, Eq, GHC.Generic, Generic, HasDatatypeInfo)
+ 
+ 
+ -- | this function indicates to catch that an error is expected

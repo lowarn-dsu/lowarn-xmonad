@@ -1,0 +1,2843 @@
+diff --git a/source/CONFIG b/source/CONFIG
+deleted file mode 100644
+index ae49877..0000000
+--- a/source/CONFIG
++++ /dev/null
+@@ -1,82 +0,0 @@
+-== Configuring xmonad ==
+-
+-xmonad is configured by creating and editing the file:
+-
+-    ~/.xmonad/xmonad.hs
+-
+-xmonad then uses settings from this file as arguments to the window manager,
+-on startup. For a complete example of possible settings, see the file:
+-
+-    man/xmonad.hs
+-
+-Further examples are on the website, wiki and extension documentation.
+-
+-    http://haskell.org/haskellwiki/Xmonad
+-
+-== A simple example ==
+-
+-Here is a basic example, which overrides the default border width,
+-default terminal, and some colours. This text goes in the file
+-$HOME/.xmonad/xmonad.hs :
+-
+-    import XMonad
+-
+-    main = xmonad $ defaultConfig
+-        { borderWidth        = 2
+-        , terminal           = "urxvt"
+-        , normalBorderColor  = "#cccccc"
+-        , focusedBorderColor = "#cd8b00" }
+-
+-You can find the defaults in the file:
+-
+-    XMonad/Config.hs
+-
+-== Checking your xmonad.hs is correct ==
+-
+-Place this text in ~/.xmonad/xmonad.hs, and then check that it is
+-syntactically and type correct by loading it in the Haskell
+-interpreter:
+-
+-    $ ghci ~/.xmonad/xmonad.hs
+-    GHCi, version 6.8.1: http://www.haskell.org/ghc/  :? for help
+-    Loading package base ... linking ... done.
+-    Ok, modules loaded: Main.
+-
+-    Prelude Main> :t main
+-    main :: IO ()
+-
+-Ok, looks good.
+-
+-== Loading your configuration ==
+-
+-To have xmonad start using your settings, type 'mod-q'.  xmonad will
+-then load this new file, and run it.  If it is unable to, the defaults
+-are used.
+-
+-To load successfully, both 'xmonad' and 'ghc' must be in your $PATH
+-environment variable.  If GHC isn't in your path, for some reason, you
+-can compile the xmonad.hs file yourself:
+-
+-    $ cd ~/.xmonad
+-    $ ghc --make xmonad.hs
+-    $ ls
+-    xmonad    xmonad.hi xmonad.hs xmonad.o
+-
+-When you hit mod-q, this newly compiled xmonad will be used.
+-
+-== Where are the defaults? ==
+-
+-The default configuration values are defined in the source file:
+-
+-    XMonad/Config.hs
+-
+-the XConfig data structure itself is defined in:
+-
+-    XMonad/Core.hs
+-
+-== Extensions ==
+-
+-Since the xmonad.hs file is just another Haskell module, you may import
+-and use any Haskell code or libraries you wish. For example, you can use
+-things from the xmonad-contrib library, or other code you write
+-yourself.
+diff --git a/source/Main.hs b/source/Main.hs
+deleted file mode 100644
+index cd076b5..0000000
+--- a/source/Main.hs
++++ /dev/null
+@@ -1,109 +0,0 @@
+-----------------------------------------------------------------------------
+--- |
+--- Module      :  Main
+--- Copyright   :  (c) Spencer Janssen 2007
+--- License     :  BSD3-style (see LICENSE)
+---
+--- Maintainer  :  sjanssen@cse.unl.edu
+--- Stability   :  unstable
+--- Portability :  not portable, uses mtl, X11, posix
+---
+--- xmonad, a minimalist, tiling window manager for X11
+---
+------------------------------------------------------------------------------
+-
+-module Main (main) where
+-
+-import XMonad
+-
+-import Control.Monad (unless)
+-import System.Info
+-import System.Environment
+-import System.Posix.Process (executeFile)
+-import System.Exit (exitFailure)
+-
+-import Paths_xmonad (version)
+-import Data.Version (showVersion)
+-
+-import Graphics.X11.Xinerama (compiledWithXinerama)
+-
+-#ifdef TESTING
+-import qualified Properties
+-#endif
+-
+--- | The entry point into xmonad. Attempts to compile any custom main
+--- for xmonad, and if it doesn't find one, just launches the default.
+-main :: IO ()
+-main = do
+-    installSignalHandlers -- important to ignore SIGCHLD to avoid zombies
+-    args <- getArgs
+-    let launch = catchIO buildLaunch >> xmonad defaultConfig
+-    case args of
+-        []                    -> launch
+-        ("--resume":_)        -> launch
+-        ["--help"]            -> usage
+-        ["--recompile"]       -> recompile True >>= flip unless exitFailure
+-        ["--replace"]         -> launch
+-        ["--restart"]         -> sendRestart >> return ()
+-        ["--version"]         -> putStrLn $ unwords shortVersion
+-        ["--verbose-version"] -> putStrLn . unwords $ shortVersion ++ longVersion
+-#ifdef TESTING
+-        ("--run-tests":_)     -> Properties.main
+-#endif
+-        _                     -> fail "unrecognized flags"
+- where
+-    shortVersion = ["xmonad", showVersion version]
+-    longVersion  = [ "compiled by", compilerName, showVersion compilerVersion
+-                   , "for",  arch ++ "-" ++ os
+-                   , "\nXinerama:", show compiledWithXinerama ]
+-
+-usage :: IO ()
+-usage = do
+-    self <- getProgName
+-    putStr . unlines $
+-        concat ["Usage: ", self, " [OPTION]"] :
+-        "Options:" :
+-        "  --help                       Print this message" :
+-        "  --version                    Print the version number" :
+-        "  --recompile                  Recompile your ~/.xmonad/xmonad.hs" :
+-        "  --replace                    Replace the running window manager with xmonad" :
+-        "  --restart                    Request a running xmonad process to restart" :
+-#ifdef TESTING
+-        "  --run-tests                  Run the test suite" :
+-#endif
+-        []
+-
+--- | Build "~\/.xmonad\/xmonad.hs" with ghc, then execute it.  If there are no
+--- errors, this function does not return.  An exception is raised in any of
+--- these cases:
+---
+---   * ghc missing
+---
+---   * both "~\/.xmonad\/xmonad.hs" and "~\/.xmonad\/xmonad-$arch-$os" missing
+---
+---   * xmonad.hs fails to compile
+---
+---      ** wrong ghc in path (fails to compile)
+---
+---      ** type error, syntax error, ..
+---
+---   * Missing XMonad\/XMonadContrib modules due to ghc upgrade
+---
+-buildLaunch ::  IO ()
+-buildLaunch = do
+-    recompile False
+-    dir  <- getXMonadDir
+-    args <- getArgs
+-    executeFile (dir ++ "/xmonad-"++arch++"-"++os) False args Nothing
+-    return ()
+-
+-sendRestart :: IO ()
+-sendRestart = do
+-    dpy <- openDisplay ""
+-    rw <- rootWindow dpy $ defaultScreen dpy
+-    xmonad_restart <- internAtom dpy "XMONAD_RESTART" False
+-    allocaXEvent $ \e -> do
+-        setEventType e clientMessage
+-        setClientMessageEvent e rw xmonad_restart 32 0 currentTime
+-        sendEvent dpy rw False structureNotifyMask e
+-    sync dpy False
+diff --git a/source/README b/source/README
+deleted file mode 100644
+index db0cce9..0000000
+--- a/source/README
++++ /dev/null
+@@ -1,149 +0,0 @@
+-                    xmonad : a tiling window manager
+-
+-                           http://xmonad.org
+-
+-    xmonad is a tiling window manager for X. Windows are arranged
+-    automatically to tile the screen without gaps or overlap, maximising
+-    screen use. Window manager features are accessible from the
+-    keyboard: a mouse is optional. xmonad is written, configured and
+-    extensible in Haskell. Custom layout algorithms, key bindings and
+-    other extensions may be written by the user in config files. Layouts
+-    are applied dynamically, and different layouts may be used on each
+-    workspace. Xinerama is fully supported, allowing windows to be tiled
+-    on several physical screens.
+-
+-Quick start:
+-
+-Obtain the dependent libraries, then build with:
+-
+-        runhaskell Setup.lhs configure --user --prefix=$HOME
+-        runhaskell Setup.lhs build
+-        runhaskell Setup.lhs install --user
+-
+-For the full story, read on.
+-
+-Building:
+-
+- Building is quite straightforward, and requires a basic Haskell toolchain.
+- On many systems xmonad is available as a binary package in your
+- package system (e.g. on Debian or Gentoo). If at all possible, use this
+- in preference to a source build, as the dependency resolution will be
+- simpler.
+-
+- We'll now walk through the complete list of toolchain dependencies.
+-
+- * GHC: the Glasgow Haskell Compiler
+-
+-    You first need a Haskell compiler. Your distribution's package
+-    system will have binaries of GHC (the Glasgow Haskell Compiler), the
+-    compiler we use, so install that first. If your operating system's
+-    package system doesn't provide a binary version of GHC, you can find
+-    them here:
+-
+-        http://haskell.org/ghc
+-
+-    For example, in Debian you would install GHC with:
+-
+-        apt-get install ghc6
+-
+-    It shouldn't be necessary to compile GHC from source -- every common
+-    system has a pre-build binary version.
+-
+- * X11 libraries:
+-
+-    Since you're building an X application, you'll need the C X11
+-    library headers. On many platforms, these come pre-installed. For
+-    others, such as Debian, you can get them from your package manager:
+-
+-        apt-get install libx11-dev
+-
+-    Typically you need: libXinerama libXext libX11
+-
+- * Cabal
+-
+-    xmonad requires a recent version of Cabal, >= 1.2.0. If you're using
+-    GHC 6.8, then it comes bundled with the right version. If you're
+-    using GHC 6.6.x, you'll need to build and install Cabal from hackage
+-    first:
+-
+-          http://hackage.haskell.org/package/Cabal
+-
+-    You can check which version you have with the command:
+-
+-        $ ghc-pkg list Cabal
+-        Cabal-1.2.2.0
+-
+- * Haskell libraries: mtl, unix, X11
+-
+-    Finally, you need the Haskell libraries xmonad depends on. Since
+-    you've a working GHC installation now, most of these will be
+-    provided. To check whether you've got a package run 'ghc-pkg list
+-    some_package_name'. You will need the following packages:
+-
+-    mtl   http://hackage.haskell.org/package/mtl
+-    unix  http://hackage.haskell.org/package/unix
+-    X11   http://hackage.haskell.org/package/X11
+-
+- * Build xmonad:
+-
+-    Once you've got all the dependencies in place (which should be
+-    straightforward), build xmonad:
+-
+-        runhaskell Setup.lhs configure --user --prefix=$HOME
+-        runhaskell Setup.lhs build
+-        runhaskell Setup.lhs install --user
+-
+-    And you're done!
+-
+-------------------------------------------------------------------------
+-
+-Running xmonad:
+-
+-    Add:
+-
+-         $HOME/bin/xmonad
+-
+-    to the last line of your .xsession or .xinitrc file.
+-
+-------------------------------------------------------------------------
+-
+-Configuring:
+-
+-    See the CONFIG document
+-
+-------------------------------------------------------------------------
+-
+-XMonadContrib
+-
+-    There are many extensions to xmonad available in the XMonadContrib
+-    (xmc) library. Examples include an ion3-like tabbed layout, a
+-    prompt/program launcher, and various other useful modules.
+-    XMonadContrib is available at:
+-
+-        latest release: http://hackage.haskell.org/package/xmonad-contrib
+-
+-        darcs version:  darcs get http://code.haskell.org/XMonadContrib
+-
+-------------------------------------------------------------------------
+-
+-Other useful programs:
+-
+- A nicer xterm replacement, that supports resizing better:
+-
+-    urxvt       http://software.schmorp.de/pkg/rxvt-unicode.html
+-
+- For custom status bars:
+-
+-    dzen        http://gotmor.googlepages.com/dzen
+-    xmobar http://hackage.haskell.org/package/xmobar
+-
+- For a program dispatch menu:
+-
+-    dmenu       http://www.suckless.org/download/
+-    gmrun       (in your package system)
+-
+-Authors:
+-
+-    Spencer Janssen
+-    Don Stewart
+-    Jason Creighton
+diff --git a/source/STYLE b/source/STYLE
+deleted file mode 100644
+index 5f86272..0000000
+--- a/source/STYLE
++++ /dev/null
+@@ -1,21 +0,0 @@
+-
+-== Coding guidelines for contributing to
+-== xmonad and the xmonad contributed extensions
+-
+-* Comment every top level function (particularly exported functions), and
+-  provide a type signature; use Haddock syntax in the comments.
+-
+-* Follow the coding style of the other modules.
+-
+-* Code should be compilable with -Wall -Werror. There should be no warnings.
+-
+-* Partial functions should be avoided: the window manager should not
+-  crash, so do not call `error` or `undefined`
+-
+-* Tabs are illegal. Use 4 spaces for indenting.
+-
+-* Any pure function added to the core should have QuickCheck properties
+-  precisely defining its behavior.
+-
+-* New modules should identify the author, and be submitted under
+-  the same license as xmonad (BSD3 license or freer).
+diff --git a/source/TODO b/source/TODO
+deleted file mode 100644
+index 5664f58..0000000
+--- a/source/TODO
++++ /dev/null
+@@ -1,23 +0,0 @@
+- - Write down invariants for the window life cycle, especially:
+-    - When are borders set?  Prove that the current handling is sufficient.
+-
+- - current floating layer handling is nonoptimal. FocusUp should raise,
+-   for example
+-
+- - Issues still with stacking order.
+-
+-= Release management =
+-
+-* configuration documentation
+-
+-* generate haddocks for core and XMC, upload to xmonad.org
+-* generate manpage, generate html manpage
+-* double check README build instructions
+-* test core with 6.6 and 6.8
+-* bump xmonad.cabal version and X11 version
+-* upload X11 and xmonad to Hackage
+-* update links to hackage in download.html
+-* update #xmonad topic
+-* check examples/text in user-facing Config.hs
+-* check tour.html and intro.html are up to date, and mention all core bindings
+-* confirm template config is type correct
+diff --git a/source/XMonad/Core.hs b/simplified/XMonad/Core.hs
+index e3d1b27..cca4018 100644
+--- a/source/XMonad/Core.hs
++++ b/simplified/XMonad/Core.hs
+@@ -35,8 +35,10 @@ import Prelude hiding ( catch )
+ import Codec.Binary.UTF8.String (encodeString)
+ import Control.Exception.Extensible (catch, fromException, try, bracket, throw, finally, SomeException(..))
+ import Control.Applicative
++import Control.Monad.Fail
+ import Control.Monad.State
+ import Control.Monad.Reader
++import Data.Semigroup
+ import System.FilePath
+ import System.IO
+ import System.Info
+@@ -52,7 +54,7 @@ import Graphics.X11.Xlib.Extras (Event)
+ import Data.Typeable
+ import Data.List ((\\))
+ import Data.Maybe (isJust,fromMaybe)
+-import Data.Monoid
++import Data.Monoid hiding ((<>))
+ 
+ import qualified Data.Map as M
+ import qualified Data.Set as S
+@@ -137,23 +139,29 @@ data ScreenDetail   = SD { screenRect :: !Rectangle } deriving (Eq,Show, Read)
+ -- instantiated on 'XConf' and 'XState' automatically.
+ --
+ newtype X a = X (ReaderT XConf (StateT XState IO) a)
+-    deriving (Functor, Monad, MonadIO, MonadState XState, MonadReader XConf, Typeable)
++    deriving (Functor, Monad, MonadFail, MonadIO, MonadState XState, MonadReader XConf, Typeable)
+ 
+ instance Applicative X where
+   pure = return
+   (<*>) = ap
+ 
++instance Semigroup a => Semigroup (X a) where
++    (<>) = liftM2 (<>)
++
+ instance (Monoid a) => Monoid (X a) where
+     mempty  = return mempty
+     mappend = liftM2 mappend
+ 
+ type ManageHook = Query (Endo WindowSet)
+ newtype Query a = Query (ReaderT Window X a)
+-    deriving (Functor, Monad, MonadReader Window, MonadIO)
++    deriving (Functor, Applicative, Monad, MonadReader Window, MonadIO)
+ 
+ runQuery :: Query a -> Window -> X a
+ runQuery (Query m) w = runReaderT m w
+ 
++instance Semigroup a => Semigroup (Query a) where
++    (<>) = liftM2 (<>)
++
+ instance Monoid a => Monoid (Query a) where
+     mempty  = return mempty
+     mappend = liftM2 mappend
+diff --git a/source/xmonad.cabal b/simplified/lowarn-version-xmonad-v1156.cabal
+similarity index 62%
+rename from source/xmonad.cabal
+rename to simplified/lowarn-version-xmonad-v1156.cabal
+index d0a287f..cd4fb6e 100644
+--- a/source/xmonad.cabal
++++ b/simplified/lowarn-version-xmonad-v1156.cabal
+@@ -1,4 +1,4 @@
+-name:               xmonad
++name:               lowarn-version-xmonad-v1156
+ version:            0.11
+ homepage:           http://xmonad.org
+ synopsis:           A tiling window manager
+@@ -17,10 +17,7 @@ license:            BSD3
+ license-file:       LICENSE
+ author:             Spencer Janssen
+ maintainer:         xmonad@haskell.org
+-extra-source-files: README TODO CONFIG STYLE tests/loc.hs tests/Properties.hs
+-                    man/xmonad.1.markdown man/xmonad.1 man/xmonad.1.html
+-                    util/GenerateManpage.hs
+-cabal-version:      >= 1.6
++cabal-version:      >= 1.10
+ bug-reports:        http://code.google.com/p/xmonad/issues/list
+ build-type:         Simple
+ 
+@@ -30,8 +27,6 @@ tested-with:        GHC==7.6.1,
+                     GHC==6.12.3,
+                     GHC==6.10.4
+ 
+-data-files:         man/xmonad.hs, man/xmonad.1, man/xmonad.1.html
+-
+ source-repository head
+   type:     darcs
+   location: http://code.haskell.org/xmonad
+@@ -57,45 +52,23 @@ library
+         build-depends: base < 5 && >=3, containers, directory, process, filepath, extensible-exceptions
+     else
+         build-depends: base < 3
+-    build-depends: X11>=1.5 && < 1.7, mtl, unix,
+-                   utf8-string >= 0.3 && < 0.4
++    build-depends: X11>=1.5 && < 1.11, mtl, unix,
++                   utf8-string >= 0.3 && < 1.1,
++                   semigroups
+ 
+     if true
+         ghc-options:        -funbox-strict-fields -Wall
+ 
++    default-language: Haskell2010
++
+     if impl(ghc >= 6.12.1)
+         ghc-options:        -fno-warn-unused-do-bind
+ 
+     ghc-prof-options:   -prof -auto-all
+     extensions:         CPP
+ 
+-    if flag(testing)
+-        buildable: False
+-
+-executable xmonad
+-    main-is:            Main.hs
+-    other-modules:      XMonad
+-                        XMonad.Main
+-                        XMonad.Core
+-                        XMonad.Config
+-                        XMonad.Layout
+-                        XMonad.ManageHook
+-                        XMonad.Operations
+-                        XMonad.StackSet
+-
+-    if true 
+-        ghc-options:    -funbox-strict-fields -Wall
+-
+-    if impl(ghc >= 6.12.1)
+-        ghc-options:    -fno-warn-unused-do-bind
+-
+-    ghc-prof-options:   -prof -auto-all
+-    extensions:         CPP
++    if !impl(ghc > 8)
++        build-depends: fail
+ 
+     if flag(testing)
+-        cpp-options:    -DTESTING
+-        hs-source-dirs: . tests/
+-        build-depends:  QuickCheck < 2
+-        ghc-options:    -Werror
+-    if flag(testing) && flag(small_base)
+-        build-depends:  filepath, process, directory, mtl, unix, X11, base, containers, random, extensible-exceptions
++        buildable: False
+diff --git a/source/man/HCAR.tex b/source/man/HCAR.tex
+deleted file mode 100644
+index 338494a..0000000
+--- a/source/man/HCAR.tex
++++ /dev/null
+@@ -1,71 +0,0 @@
+-% xmonad-Gx.tex
+-\begin{hcarentry}{xmonad}
+-\label{xmonad}
+-\report{Gwern Branwen}%11/11
+-\status{active development}
+-\makeheader
+-
+-XMonad is a tiling window manager for X. Windows are arranged
+-automatically to tile the screen without gaps or overlap, maximizing
+-screen use. Window manager features are accessible from the keyboard; a
+-mouse is optional. XMonad is written, configured, and extensible in
+-Haskell. Custom layout algorithms, key bindings, and other extensions may
+-be written by the user in config files. Layouts are applied
+-dynamically, and different layouts may be used on each workspace.
+-Xinerama is fully supported, allowing windows to be tiled on several
+-physical screens.
+-
+-Development since the last report has continued; XMonad founder Don Stewart
+-has stepped down and Adam Vogt is the new maintainer.
+-After gestating for 2 years, version 0.10 has been released, with simultaneous
+-releases of the XMonadContrib library of customizations (which has now grown to
+-no less than 216 modules encompassing a dizzying array of features) and the
+-xmonad-extras package of extensions,
+-
+-Details of changes between releases can be found in the release notes:
+-\begin{compactitem}
+-\item \url{http://haskell.org/haskellwiki/Xmonad/Notable_changes_since_0.8}
+-\item \url{http://haskell.org/haskellwiki/Xmonad/Notable_changes_since_0.9}
+-% \item \url{http://haskell.org/haskellwiki/Xmonad/Notable_changes_since_0.10}
+-\item the Darcs repositories have been upgraded to the hashed format
+-\item XMonad.Config.PlainConfig allows writing configs in a more 'normal' style, and not raw Haskell
+-\item Supports using local modules in xmonad.hs; for example: to use definitions from \~/.xmonad/lib/XMonad/Stack/MyAdditions.hs
+-\item xmonad --restart CLI option
+-\item xmonad --replace CLI option
+-\item XMonad.Prompt now has customizable keymaps
+-\item Actions.GridSelect - a GUI menu for selecting windows or workspaces \& substring search on window names
+-\item Actions.OnScreen
+-\item Extensions now can have state
+-\item Actions.SpawnOn - uses state to spawn applications on the workspace the user was originally on,
+-  and not where the user happens to be
+-\item Markdown manpages and not man/troff
+-\item  XMonad.Layout.ImageButtonDecoration \&\\ XMonad.Util.Image
+-\item XMonad.Layout.Groups
+-\item XMonad.Layout.ZoomRow
+-\item XMonad.Layout.Renamed
+-\item XMonad.Layout.Drawer
+-\item XMonad.Layout.FullScreen
+-\item XMonad.Hooks.ScreenCorners
+-\item XMonad.Actions.DynamicWorkspaceOrder
+-\item XMonad.Actions.WorkspaceNames
+-\item XMonad.Actions.DynamicWorkspaceGroups
+-\end{compactitem}
+-
+-Binary packages of XMonad and XMonadContrib are available for all major Linux distributions.
+-
+-\FurtherReading
+-\begin{compactitem}
+-\item Homepage:
+- \url{http://xmonad.org/}
+-
+-\item Darcs source:
+-
+- \texttt{darcs get} \url{http://code.haskell.org/xmonad}
+-
+-\item IRC channel:
+- \verb+#xmonad @@ irc.freenode.org+
+-
+-\item Mailing list:
+- \email{xmonad@@haskell.org}
+-\end{compactitem}
+-\end{hcarentry}
+diff --git a/source/man/xmonad.1 b/source/man/xmonad.1
+deleted file mode 100644
+index 2c52f73..0000000
+--- a/source/man/xmonad.1
++++ /dev/null
+@@ -1,281 +0,0 @@
+-.TH xmonad 1 "31 December 2012" xmonad-0.11 "xmonad manual".TH  "" "" 
+-.SH Name
+-.PP
+-xmonad - a tiling window manager
+-.SH Description
+-.PP
+-\f[I]xmonad\f[] is a minimalist tiling window manager for X, written in
+-Haskell.
+-Windows are managed using automatic layout algorithms, which can be
+-dynamically reconfigured.
+-At any time windows are arranged so as to maximize the use of screen
+-real estate.
+-All features of the window manager are accessible purely from the
+-keyboard: a mouse is entirely optional.
+-\f[I]xmonad\f[] is configured in Haskell, and custom layout algorithms
+-may be implemented by the user in config files.
+-A principle of \f[I]xmonad\f[] is predictability: the user should know
+-in advance precisely the window arrangement that will result from any
+-action.
+-.PP
+-By default, \f[I]xmonad\f[] provides three layout algorithms: tall, wide
+-and fullscreen.
+-In tall or wide mode, windows are tiled and arranged to prevent overlap
+-and maximize screen use.
+-Sets of windows are grouped together on virtual screens, and each screen
+-retains its own layout, which may be reconfigured dynamically.
+-Multiple physical monitors are supported via Xinerama, allowing
+-simultaneous display of a number of screens.
+-.PP
+-By utilizing the expressivity of a modern functional language with a
+-rich static type system, \f[I]xmonad\f[] provides a complete, featureful
+-window manager in less than 1200 lines of code, with an emphasis on
+-correctness and robustness.
+-Internal properties of the window manager are checked using a
+-combination of static guarantees provided by the type system, and
+-type-based automated testing.
+-A benefit of this is that the code is simple to understand, and easy to
+-modify.
+-.SH Usage
+-.PP
+-\f[I]xmonad\f[] places each window into a "workspace".
+-Each workspace can have any number of windows, which you can cycle
+-though with mod-j and mod-k.
+-Windows are either displayed full screen, tiled horizontally, or tiled
+-vertically.
+-You can toggle the layout mode with mod-space, which will cycle through
+-the available modes.
+-.PP
+-You can switch to workspace N with mod-N.
+-For example, to switch to workspace 5, you would press mod-5.
+-Similarly, you can move the current window to another workspace with
+-mod-shift-N.
+-.PP
+-When running with multiple monitors (Xinerama), each screen has exactly
+-1 workspace visible.
+-mod-{w,e,r} switch the focus between screens, while shift-mod-{w,e,r}
+-move the current window to that screen.
+-When \f[I]xmonad\f[] starts, workspace 1 is on screen 1, workspace 2 is
+-on screen 2, etc.
+-When switching workspaces to one that is already visible, the current
+-and visible workspaces are swapped.
+-.SS Flags
+-.PP
+-xmonad has several flags which you may pass to the executable.
+-These flags are:
+-.TP
+-.B --recompile
+-Recompiles your configuration in \f[I]~/.xmonad/xmonad.hs\f[]
+-.RS
+-.RE
+-.TP
+-.B --restart
+-Causes the currently running \f[I]xmonad\f[] process to restart
+-.RS
+-.RE
+-.TP
+-.B --replace
+-Replace the current window manager with xmonad
+-.RS
+-.RE
+-.TP
+-.B --version
+-Display version of \f[I]xmonad\f[]
+-.RS
+-.RE
+-.TP
+-.B --verbose-version
+-Display detailed version of \f[I]xmonad\f[]
+-.RS
+-.RE
+-.SS Default keyboard bindings
+-.TP
+-.B mod-shift-return
+-Launch terminal
+-.RS
+-.RE
+-.TP
+-.B mod-p
+-Launch dmenu
+-.RS
+-.RE
+-.TP
+-.B mod-shift-p
+-Launch gmrun
+-.RS
+-.RE
+-.TP
+-.B mod-shift-c
+-Close the focused window
+-.RS
+-.RE
+-.TP
+-.B mod-space
+-Rotate through the available layout algorithms
+-.RS
+-.RE
+-.TP
+-.B mod-shift-space
+-Reset the layouts on the current workspace to default
+-.RS
+-.RE
+-.TP
+-.B mod-n
+-Resize viewed windows to the correct size
+-.RS
+-.RE
+-.TP
+-.B mod-tab
+-Move focus to the next window
+-.RS
+-.RE
+-.TP
+-.B mod-shift-tab
+-Move focus to the previous window
+-.RS
+-.RE
+-.TP
+-.B mod-j
+-Move focus to the next window
+-.RS
+-.RE
+-.TP
+-.B mod-k
+-Move focus to the previous window
+-.RS
+-.RE
+-.TP
+-.B mod-m
+-Move focus to the master window
+-.RS
+-.RE
+-.TP
+-.B mod-return
+-Swap the focused window and the master window
+-.RS
+-.RE
+-.TP
+-.B mod-shift-j
+-Swap the focused window with the next window
+-.RS
+-.RE
+-.TP
+-.B mod-shift-k
+-Swap the focused window with the previous window
+-.RS
+-.RE
+-.TP
+-.B mod-h
+-Shrink the master area
+-.RS
+-.RE
+-.TP
+-.B mod-l
+-Expand the master area
+-.RS
+-.RE
+-.TP
+-.B mod-t
+-Push window back into tiling
+-.RS
+-.RE
+-.TP
+-.B mod-comma
+-Increment the number of windows in the master area
+-.RS
+-.RE
+-.TP
+-.B mod-period
+-Deincrement the number of windows in the master area
+-.RS
+-.RE
+-.TP
+-.B mod-shift-q
+-Quit xmonad
+-.RS
+-.RE
+-.TP
+-.B mod-q
+-Restart xmonad
+-.RS
+-.RE
+-.TP
+-.B mod-shift-slash
+-Run xmessage with a summary of the default keybindings (useful for
+-beginners)
+-.RS
+-.RE
+-.TP
+-.B mod-[1..9]
+-Switch to workspace N
+-.RS
+-.RE
+-.TP
+-.B mod-shift-[1..9]
+-Move client to workspace N
+-.RS
+-.RE
+-.TP
+-.B mod-{w,e,r}
+-Switch to physical/Xinerama screens 1, 2, or 3
+-.RS
+-.RE
+-.TP
+-.B mod-shift-{w,e,r}
+-Move client to screen 1, 2, or 3
+-.RS
+-.RE
+-.TP
+-.B mod-button1
+-Set the window to floating mode and move by dragging
+-.RS
+-.RE
+-.TP
+-.B mod-button2
+-Raise the window to the top of the stack
+-.RS
+-.RE
+-.TP
+-.B mod-button3
+-Set the window to floating mode and resize by dragging
+-.RS
+-.RE
+-.SH Examples
+-.PP
+-To use xmonad as your window manager add to your \f[I]~/.xinitrc\f[]
+-file:
+-.IP
+-.nf
+-\f[C]
+-exec\ xmonad
+-\f[]
+-.fi
+-.SH Customization
+-.PP
+-xmonad is customized in ~/.xmonad/xmonad.hs, and then restarting with
+-mod-q.
+-.PP
+-You can find many extensions to the core feature set in the xmonad-
+-contrib package, available through your package manager or from
+-xmonad.org (http://xmonad.org).
+-.SS Modular Configuration
+-.PP
+-As of \f[I]xmonad-0.9\f[], any additional Haskell modules may be placed
+-in \f[I]~/.xmonad/lib/\f[] are available in GHC\[aq]s searchpath.
+-Hierarchical modules are supported: for example, the file
+-\f[I]~/.xmonad/lib/XMonad/Stack/MyAdditions.hs\f[] could contain:
+-.IP
+-.nf
+-\f[C]
+-module\ XMonad.Stack.MyAdditions\ (function1)\ where
+-\ \ \ \ function1\ =\ error\ "function1:\ Not\ implemented\ yet!"
+-\f[]
+-.fi
+-.PP
+-Your xmonad.hs may then import XMonad.Stack.MyAdditions as if that
+-module was contained within xmonad or xmonad-contrib.
+-.SH Bugs
+-.PP
+-Probably.
+-If you find any, please report them to the
+-bugtracker (http://code.google.com/p/xmonad/issues/list)
+diff --git a/source/man/xmonad.1.html b/source/man/xmonad.1.html
+deleted file mode 100644
+index 73fa8bd..0000000
+--- a/source/man/xmonad.1.html
++++ /dev/null
+@@ -1,181 +0,0 @@
+-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+-<html xmlns="http://www.w3.org/1999/xhtml">
+-<head>
+-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+-  <meta http-equiv="Content-Style-Type" content="text/css" />
+-  <meta name="generator" content="pandoc" />
+-  <title></title>
+-  <style type="text/css">
+-table.sourceCode, tr.sourceCode, td.lineNumbers, td.sourceCode {
+-  margin: 0; padding: 0; vertical-align: baseline; border: none; }
+-table.sourceCode { width: 100%; }
+-td.lineNumbers { text-align: right; padding-right: 4px; padding-left: 4px; color: #aaaaaa; border-right: 1px solid #aaaaaa; }
+-td.sourceCode { padding-left: 5px; }
+-code > span.kw { color: #007020; font-weight: bold; }
+-code > span.dt { color: #902000; }
+-code > span.dv { color: #40a070; }
+-code > span.bn { color: #40a070; }
+-code > span.fl { color: #40a070; }
+-code > span.ch { color: #4070a0; }
+-code > span.st { color: #4070a0; }
+-code > span.co { color: #60a0b0; font-style: italic; }
+-code > span.ot { color: #007020; }
+-code > span.al { color: #ff0000; font-weight: bold; }
+-code > span.fu { color: #06287e; }
+-code > span.er { color: #ff0000; font-weight: bold; }
+-  </style>
+-</head>
+-<body>
+-<h1>xmonad-0.11</h1><p>Section: xmonad manual (1)<br/>Updated: 31 December 2012</p><hr/>
+-<div id="TOC">
+-<ul>
+-<li><a href="#name">Name</a></li>
+-<li><a href="#description">Description</a></li>
+-<li><a href="#usage">Usage</a><ul>
+-<li><a href="#flags">Flags</a></li>
+-<li><a href="#default-keyboard-bindings">Default keyboard bindings</a></li>
+-</ul></li>
+-<li><a href="#examples">Examples</a></li>
+-<li><a href="#customization">Customization</a><ul>
+-<li><a href="#modular-configuration">Modular Configuration</a></li>
+-</ul></li>
+-<li><a href="#bugs">Bugs</a></li>
+-</ul>
+-</div>
+-<h1 id="name"><a href="#TOC">Name</a></h1>
+-<p>xmonad - a tiling window manager</p>
+-<h1 id="description"><a href="#TOC">Description</a></h1>
+-<p><em>xmonad</em> is a minimalist tiling window manager for X, written in Haskell. Windows are managed using automatic layout algorithms, which can be dynamically reconfigured. At any time windows are arranged so as to maximize the use of screen real estate. All features of the window manager are accessible purely from the keyboard: a mouse is entirely optional. <em>xmonad</em> is configured in Haskell, and custom layout algorithms may be implemented by the user in config files. A principle of <em>xmonad</em> is predictability: the user should know in advance precisely the window arrangement that will result from any action.</p>
+-<p>By default, <em>xmonad</em> provides three layout algorithms: tall, wide and fullscreen. In tall or wide mode, windows are tiled and arranged to prevent overlap and maximize screen use. Sets of windows are grouped together on virtual screens, and each screen retains its own layout, which may be reconfigured dynamically. Multiple physical monitors are supported via Xinerama, allowing simultaneous display of a number of screens.</p>
+-<p>By utilizing the expressivity of a modern functional language with a rich static type system, <em>xmonad</em> provides a complete, featureful window manager in less than 1200 lines of code, with an emphasis on correctness and robustness. Internal properties of the window manager are checked using a combination of static guarantees provided by the type system, and type-based automated testing. A benefit of this is that the code is simple to understand, and easy to modify.</p>
+-<h1 id="usage"><a href="#TOC">Usage</a></h1>
+-<p><em>xmonad</em> places each window into a &quot;workspace&quot;. Each workspace can have any number of windows, which you can cycle though with mod-j and mod-k. Windows are either displayed full screen, tiled horizontally, or tiled vertically. You can toggle the layout mode with mod-space, which will cycle through the available modes.</p>
+-<p>You can switch to workspace N with mod-N. For example, to switch to workspace 5, you would press mod-5. Similarly, you can move the current window to another workspace with mod-shift-N.</p>
+-<p>When running with multiple monitors (Xinerama), each screen has exactly 1 workspace visible. mod-{w,e,r} switch the focus between screens, while shift-mod-{w,e,r} move the current window to that screen. When <em>xmonad</em> starts, workspace 1 is on screen 1, workspace 2 is on screen 2, etc. When switching workspaces to one that is already visible, the current and visible workspaces are swapped.</p>
+-<h2 id="flags"><a href="#TOC">Flags</a></h2>
+-<p>xmonad has several flags which you may pass to the executable. These flags are:</p>
+-<dl>
+-<dt>--recompile</dt>
+-<dd><p>Recompiles your configuration in <em>~/.xmonad/xmonad.hs</em></p>
+-</dd>
+-<dt>--restart</dt>
+-<dd><p>Causes the currently running <em>xmonad</em> process to restart</p>
+-</dd>
+-<dt>--replace</dt>
+-<dd><p>Replace the current window manager with xmonad</p>
+-</dd>
+-<dt>--version</dt>
+-<dd><p>Display version of <em>xmonad</em></p>
+-</dd>
+-<dt>--verbose-version</dt>
+-<dd><p>Display detailed version of <em>xmonad</em></p>
+-</dd>
+-</dl>
+-<h2 id="default-keyboard-bindings"><a href="#TOC">Default keyboard bindings</a></h2>
+-<dl>
+-<dt>mod-shift-return</dt>
+-<dd><p>Launch terminal</p>
+-</dd>
+-<dt>mod-p</dt>
+-<dd><p>Launch dmenu</p>
+-</dd>
+-<dt>mod-shift-p</dt>
+-<dd><p>Launch gmrun</p>
+-</dd>
+-<dt>mod-shift-c</dt>
+-<dd><p>Close the focused window</p>
+-</dd>
+-<dt>mod-space</dt>
+-<dd><p>Rotate through the available layout algorithms</p>
+-</dd>
+-<dt>mod-shift-space</dt>
+-<dd><p>Reset the layouts on the current workspace to default</p>
+-</dd>
+-<dt>mod-n</dt>
+-<dd><p>Resize viewed windows to the correct size</p>
+-</dd>
+-<dt>mod-tab</dt>
+-<dd><p>Move focus to the next window</p>
+-</dd>
+-<dt>mod-shift-tab</dt>
+-<dd><p>Move focus to the previous window</p>
+-</dd>
+-<dt>mod-j</dt>
+-<dd><p>Move focus to the next window</p>
+-</dd>
+-<dt>mod-k</dt>
+-<dd><p>Move focus to the previous window</p>
+-</dd>
+-<dt>mod-m</dt>
+-<dd><p>Move focus to the master window</p>
+-</dd>
+-<dt>mod-return</dt>
+-<dd><p>Swap the focused window and the master window</p>
+-</dd>
+-<dt>mod-shift-j</dt>
+-<dd><p>Swap the focused window with the next window</p>
+-</dd>
+-<dt>mod-shift-k</dt>
+-<dd><p>Swap the focused window with the previous window</p>
+-</dd>
+-<dt>mod-h</dt>
+-<dd><p>Shrink the master area</p>
+-</dd>
+-<dt>mod-l</dt>
+-<dd><p>Expand the master area</p>
+-</dd>
+-<dt>mod-t</dt>
+-<dd><p>Push window back into tiling</p>
+-</dd>
+-<dt>mod-comma</dt>
+-<dd><p>Increment the number of windows in the master area</p>
+-</dd>
+-<dt>mod-period</dt>
+-<dd><p>Deincrement the number of windows in the master area</p>
+-</dd>
+-<dt>mod-shift-q</dt>
+-<dd><p>Quit xmonad</p>
+-</dd>
+-<dt>mod-q</dt>
+-<dd><p>Restart xmonad</p>
+-</dd>
+-<dt>mod-shift-slash</dt>
+-<dd><p>Run xmessage with a summary of the default keybindings (useful for beginners)</p>
+-</dd>
+-<dt>mod-[1..9]</dt>
+-<dd><p>Switch to workspace N</p>
+-</dd>
+-<dt>mod-shift-[1..9]</dt>
+-<dd><p>Move client to workspace N</p>
+-</dd>
+-<dt>mod-{w,e,r}</dt>
+-<dd><p>Switch to physical/Xinerama screens 1, 2, or 3</p>
+-</dd>
+-<dt>mod-shift-{w,e,r}</dt>
+-<dd><p>Move client to screen 1, 2, or 3</p>
+-</dd>
+-<dt>mod-button1</dt>
+-<dd><p>Set the window to floating mode and move by dragging</p>
+-</dd>
+-<dt>mod-button2</dt>
+-<dd><p>Raise the window to the top of the stack</p>
+-</dd>
+-<dt>mod-button3</dt>
+-<dd><p>Set the window to floating mode and resize by dragging</p>
+-</dd>
+-</dl>
+-<h1 id="examples"><a href="#TOC">Examples</a></h1>
+-<p>To use xmonad as your window manager add to your <em>~/.xinitrc</em> file:</p>
+-<pre class="sourceCode literate haskell"><code class="sourceCode haskell">exec xmonad</code></pre>
+-<h1 id="customization"><a href="#TOC">Customization</a></h1>
+-<p>xmonad is customized in ~/.xmonad/xmonad.hs, and then restarting with mod-q.</p>
+-<p>You can find many extensions to the core feature set in the xmonad- contrib package, available through your package manager or from <a href="http://xmonad.org">xmonad.org</a>.</p>
+-<h2 id="modular-configuration"><a href="#TOC">Modular Configuration</a></h2>
+-<p>As of <em>xmonad-0.9</em>, any additional Haskell modules may be placed in <em>~/.xmonad/lib/</em> are available in GHC's searchpath. Hierarchical modules are supported: for example, the file <em>~/.xmonad/lib/XMonad/Stack/MyAdditions.hs</em> could contain:</p>
+-<pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">module</span> <span class="dt">XMonad.Stack.MyAdditions</span> (function1) <span class="kw">where</span>
+-    function1 <span class="fu">=</span> <span class="fu">error</span> <span class="st">&quot;function1: Not implemented yet!&quot;</span></code></pre>
+-<p>Your xmonad.hs may then import XMonad.Stack.MyAdditions as if that module was contained within xmonad or xmonad-contrib.</p>
+-<h1 id="bugs"><a href="#TOC">Bugs</a></h1>
+-<p>Probably. If you find any, please report them to the <a href="http://code.google.com/p/xmonad/issues/list">bugtracker</a></p>
+-</body>
+-</html>
+diff --git a/source/man/xmonad.1.markdown b/source/man/xmonad.1.markdown
+deleted file mode 100644
+index fd59950..0000000
+--- a/source/man/xmonad.1.markdown
++++ /dev/null
+@@ -1,102 +0,0 @@
+-#Name
+-xmonad - a tiling window manager
+-
+-#Description
+-
+-_xmonad_ is a minimalist tiling window manager for X, written in Haskell.
+-Windows are managed using automatic layout algorithms, which can be
+-dynamically reconfigured. At any time windows are arranged so as to
+-maximize the use of screen real estate. All features of the window manager
+-are accessible purely from the keyboard: a mouse is entirely optional.
+-_xmonad_ is configured in Haskell, and custom layout algorithms may be
+-implemented by the user in config files. A principle of _xmonad_ is
+-predictability: the user should know in advance precisely the window
+-arrangement that will result from any action.
+-
+-By default, _xmonad_ provides three layout algorithms: tall, wide and
+-fullscreen. In tall or wide mode, windows are tiled and arranged to prevent
+-overlap and maximize screen use. Sets of windows are grouped together on
+-virtual screens, and each screen retains its own layout, which may be
+-reconfigured dynamically. Multiple physical monitors are supported via
+-Xinerama, allowing simultaneous display of a number of screens.
+-
+-By utilizing the expressivity of a modern functional language with a rich
+-static type system, _xmonad_ provides a complete, featureful window manager
+-in less than 1200 lines of code, with an emphasis on correctness and
+-robustness. Internal properties of the window manager are checked using a
+-combination of static guarantees provided by the type system, and
+-type-based automated testing. A benefit of this is that the code is simple
+-to understand, and easy to modify.
+-
+-#Usage
+-
+-_xmonad_ places each window into a "workspace". Each workspace can have
+-any number of windows, which you can cycle though with mod-j and mod-k.
+-Windows are either displayed full screen, tiled horizontally, or tiled
+-vertically. You can toggle the layout mode with mod-space, which will cycle
+-through the available modes.
+-
+-You can switch to workspace N with mod-N. For example, to switch to
+-workspace 5, you would press mod-5. Similarly, you can move the current
+-window to another workspace with mod-shift-N.
+-
+-When running with multiple monitors (Xinerama), each screen has exactly 1
+-workspace visible. mod-{w,e,r} switch the focus between screens, while
+-shift-mod-{w,e,r} move the current window to that screen. When _xmonad_
+-starts, workspace 1 is on screen 1, workspace 2 is on screen 2, etc. When
+-switching workspaces to one that is already visible, the current and
+-visible workspaces are swapped.
+-
+-##Flags
+-xmonad  has  several flags which  you may pass to the executable.
+-These flags are:
+-
+---recompile
+-:   Recompiles your configuration in _~/.xmonad/xmonad.hs_
+-
+---restart
+-:   Causes the currently running _xmonad_ process to restart
+-
+---replace
+-:   Replace the current window manager with xmonad
+-
+---version
+-:   Display version of _xmonad_
+-
+---verbose-version
+-:   Display detailed version of _xmonad_
+-
+-##Default keyboard bindings
+-
+-___KEYBINDINGS___
+-
+-#Examples
+-To use xmonad as your window manager add to your _~/.xinitrc_ file:
+-
+-> exec xmonad
+-
+-#Customization
+-xmonad is customized in ~/.xmonad/xmonad.hs,  and  then  restarting
+-with mod-q.
+-
+-You can find many extensions to the core feature set in the xmonad-
+-contrib package, available through your  package  manager  or  from
+-[xmonad.org].
+-
+-##Modular Configuration
+-As of _xmonad-0.9_, any additional Haskell modules may be placed in
+-_~/.xmonad/lib/_ are available in GHC's searchpath. Hierarchical modules
+-are supported: for example, the file
+-_~/.xmonad/lib/XMonad/Stack/MyAdditions.hs_ could contain:
+-
+-> module XMonad.Stack.MyAdditions (function1) where
+->     function1 = error "function1: Not implemented yet!"
+-
+-Your xmonad.hs may then import XMonad.Stack.MyAdditions as if that
+-module was contained within xmonad or xmonad-contrib.
+-
+-#Bugs
+-Probably. If you find any, please report them to the [bugtracker]
+-
+-[xmonad.org]: http://xmonad.org
+-[bugtracker]: http://code.google.com/p/xmonad/issues/list
+diff --git a/source/man/xmonad.hs b/source/man/xmonad.hs
+deleted file mode 100644
+index bb4b52c..0000000
+--- a/source/man/xmonad.hs
++++ /dev/null
+@@ -1,282 +0,0 @@
+---
+--- xmonad example config file.
+---
+--- A template showing all available configuration hooks,
+--- and how to override the defaults in your own xmonad.hs conf file.
+---
+--- Normally, you'd only override those defaults you care about.
+---
+-
+-import XMonad
+-import Data.Monoid
+-import System.Exit
+-
+-import qualified XMonad.StackSet as W
+-import qualified Data.Map        as M
+-
+--- The preferred terminal program, which is used in a binding below and by
+--- certain contrib modules.
+---
+-myTerminal      = "xterm"
+-
+--- Whether focus follows the mouse pointer.
+-myFocusFollowsMouse :: Bool
+-myFocusFollowsMouse = True
+-
+--- Whether clicking on a window to focus also passes the click to the window
+-myClickJustFocuses :: Bool
+-myClickJustFocuses = False
+-
+--- Width of the window border in pixels.
+---
+-myBorderWidth   = 1
+-
+--- modMask lets you specify which modkey you want to use. The default
+--- is mod1Mask ("left alt").  You may also consider using mod3Mask
+--- ("right alt"), which does not conflict with emacs keybindings. The
+--- "windows key" is usually mod4Mask.
+---
+-myModMask       = mod1Mask
+-
+--- The default number of workspaces (virtual screens) and their names.
+--- By default we use numeric strings, but any string may be used as a
+--- workspace name. The number of workspaces is determined by the length
+--- of this list.
+---
+--- A tagging example:
+---
+--- > workspaces = ["web", "irc", "code" ] ++ map show [4..9]
+---
+-myWorkspaces    = ["1","2","3","4","5","6","7","8","9"]
+-
+--- Border colors for unfocused and focused windows, respectively.
+---
+-myNormalBorderColor  = "#dddddd"
+-myFocusedBorderColor = "#ff0000"
+-
+-------------------------------------------------------------------------
+--- Key bindings. Add, modify or remove key bindings here.
+---
+-myKeys conf@(XConfig {XMonad.modMask = modm}) = M.fromList $
+-
+-    -- launch a terminal
+-    [ ((modm .|. shiftMask, xK_Return), spawn $ XMonad.terminal conf)
+-
+-    -- launch dmenu
+-    , ((modm,               xK_p     ), spawn "dmenu_run")
+-
+-    -- launch gmrun
+-    , ((modm .|. shiftMask, xK_p     ), spawn "gmrun")
+-
+-    -- close focused window
+-    , ((modm .|. shiftMask, xK_c     ), kill)
+-
+-     -- Rotate through the available layout algorithms
+-    , ((modm,               xK_space ), sendMessage NextLayout)
+-
+-    --  Reset the layouts on the current workspace to default
+-    , ((modm .|. shiftMask, xK_space ), setLayout $ XMonad.layoutHook conf)
+-
+-    -- Resize viewed windows to the correct size
+-    , ((modm,               xK_n     ), refresh)
+-
+-    -- Move focus to the next window
+-    , ((modm,               xK_Tab   ), windows W.focusDown)
+-
+-    -- Move focus to the next window
+-    , ((modm,               xK_j     ), windows W.focusDown)
+-
+-    -- Move focus to the previous window
+-    , ((modm,               xK_k     ), windows W.focusUp  )
+-
+-    -- Move focus to the master window
+-    , ((modm,               xK_m     ), windows W.focusMaster  )
+-
+-    -- Swap the focused window and the master window
+-    , ((modm,               xK_Return), windows W.swapMaster)
+-
+-    -- Swap the focused window with the next window
+-    , ((modm .|. shiftMask, xK_j     ), windows W.swapDown  )
+-
+-    -- Swap the focused window with the previous window
+-    , ((modm .|. shiftMask, xK_k     ), windows W.swapUp    )
+-
+-    -- Shrink the master area
+-    , ((modm,               xK_h     ), sendMessage Shrink)
+-
+-    -- Expand the master area
+-    , ((modm,               xK_l     ), sendMessage Expand)
+-
+-    -- Push window back into tiling
+-    , ((modm,               xK_t     ), withFocused $ windows . W.sink)
+-
+-    -- Increment the number of windows in the master area
+-    , ((modm              , xK_comma ), sendMessage (IncMasterN 1))
+-
+-    -- Deincrement the number of windows in the master area
+-    , ((modm              , xK_period), sendMessage (IncMasterN (-1)))
+-
+-    -- Toggle the status bar gap
+-    -- Use this binding with avoidStruts from Hooks.ManageDocks.
+-    -- See also the statusBar function from Hooks.DynamicLog.
+-    --
+-    -- , ((modm              , xK_b     ), sendMessage ToggleStruts)
+-
+-    -- Quit xmonad
+-    , ((modm .|. shiftMask, xK_q     ), io (exitWith ExitSuccess))
+-
+-    -- Restart xmonad
+-    , ((modm              , xK_q     ), spawn "xmonad --recompile; xmonad --restart")
+-
+-    -- Run xmessage with a summary of the default keybindings (useful for beginners)
+-    , ((modMask .|. shiftMask, xK_slash ), spawn ("echo \"" ++ help ++ "\" | xmessage -file -"))
+-    ]
+-    ++
+-
+-    --
+-    -- mod-[1..9], Switch to workspace N
+-    -- mod-shift-[1..9], Move client to workspace N
+-    --
+-    [((m .|. modm, k), windows $ f i)
+-        | (i, k) <- zip (XMonad.workspaces conf) [xK_1 .. xK_9]
+-        , (f, m) <- [(W.greedyView, 0), (W.shift, shiftMask)]]
+-    ++
+-
+-    --
+-    -- mod-{w,e,r}, Switch to physical/Xinerama screens 1, 2, or 3
+-    -- mod-shift-{w,e,r}, Move client to screen 1, 2, or 3
+-    --
+-    [((m .|. modm, key), screenWorkspace sc >>= flip whenJust (windows . f))
+-        | (key, sc) <- zip [xK_w, xK_e, xK_r] [0..]
+-        , (f, m) <- [(W.view, 0), (W.shift, shiftMask)]]
+-
+-
+-------------------------------------------------------------------------
+--- Mouse bindings: default actions bound to mouse events
+---
+-myMouseBindings (XConfig {XMonad.modMask = modm}) = M.fromList $
+-
+-    -- mod-button1, Set the window to floating mode and move by dragging
+-    [ ((modm, button1), (\w -> focus w >> mouseMoveWindow w
+-                                       >> windows W.shiftMaster))
+-
+-    -- mod-button2, Raise the window to the top of the stack
+-    , ((modm, button2), (\w -> focus w >> windows W.shiftMaster))
+-
+-    -- mod-button3, Set the window to floating mode and resize by dragging
+-    , ((modm, button3), (\w -> focus w >> mouseResizeWindow w
+-                                       >> windows W.shiftMaster))
+-
+-    -- you may also bind events to the mouse scroll wheel (button4 and button5)
+-    ]
+-
+-------------------------------------------------------------------------
+--- Layouts:
+-
+--- You can specify and transform your layouts by modifying these values.
+--- If you change layout bindings be sure to use 'mod-shift-space' after
+--- restarting (with 'mod-q') to reset your layout state to the new
+--- defaults, as xmonad preserves your old layout settings by default.
+---
+--- The available layouts.  Note that each layout is separated by |||,
+--- which denotes layout choice.
+---
+-myLayout = tiled ||| Mirror tiled ||| Full
+-  where
+-     -- default tiling algorithm partitions the screen into two panes
+-     tiled   = Tall nmaster delta ratio
+-
+-     -- The default number of windows in the master pane
+-     nmaster = 1
+-
+-     -- Default proportion of screen occupied by master pane
+-     ratio   = 1/2
+-
+-     -- Percent of screen to increment by when resizing panes
+-     delta   = 3/100
+-
+-------------------------------------------------------------------------
+--- Window rules:
+-
+--- Execute arbitrary actions and WindowSet manipulations when managing
+--- a new window. You can use this to, for example, always float a
+--- particular program, or have a client always appear on a particular
+--- workspace.
+---
+--- To find the property name associated with a program, use
+--- > xprop | grep WM_CLASS
+--- and click on the client you're interested in.
+---
+--- To match on the WM_NAME, you can use 'title' in the same way that
+--- 'className' and 'resource' are used below.
+---
+-myManageHook = composeAll
+-    [ className =? "MPlayer"        --> doFloat
+-    , className =? "Gimp"           --> doFloat
+-    , resource  =? "desktop_window" --> doIgnore
+-    , resource  =? "kdesktop"       --> doIgnore ]
+-
+-------------------------------------------------------------------------
+--- Event handling
+-
+--- * EwmhDesktops users should change this to ewmhDesktopsEventHook
+---
+--- Defines a custom handler function for X Events. The function should
+--- return (All True) if the default handler is to be run afterwards. To
+--- combine event hooks use mappend or mconcat from Data.Monoid.
+---
+-myEventHook = mempty
+-
+-------------------------------------------------------------------------
+--- Status bars and logging
+-
+--- Perform an arbitrary action on each internal state change or X event.
+--- See the 'XMonad.Hooks.DynamicLog' extension for examples.
+---
+-myLogHook = return ()
+-
+-------------------------------------------------------------------------
+--- Startup hook
+-
+--- Perform an arbitrary action each time xmonad starts or is restarted
+--- with mod-q.  Used by, e.g., XMonad.Layout.PerWorkspace to initialize
+--- per-workspace layout choices.
+---
+--- By default, do nothing.
+-myStartupHook = return ()
+-
+-------------------------------------------------------------------------
+--- Now run xmonad with all the defaults we set up.
+-
+--- Run xmonad with the settings you specify. No need to modify this.
+---
+-main = xmonad defaults
+-
+--- A structure containing your configuration settings, overriding
+--- fields in the default config. Any you don't override, will
+--- use the defaults defined in xmonad/XMonad/Config.hs
+---
+--- No need to modify this.
+---
+-defaults = defaultConfig {
+-      -- simple stuff
+-        terminal           = myTerminal,
+-        focusFollowsMouse  = myFocusFollowsMouse,
+-        clickJustFocuses   = myClickJustFocuses,
+-        borderWidth        = myBorderWidth,
+-        modMask            = myModMask,
+-        workspaces         = myWorkspaces,
+-        normalBorderColor  = myNormalBorderColor,
+-        focusedBorderColor = myFocusedBorderColor,
+-
+-      -- key bindings
+-        keys               = myKeys,
+-        mouseBindings      = myMouseBindings,
+-
+-      -- hooks, layouts
+-        layoutHook         = myLayout,
+-        manageHook         = myManageHook,
+-        handleEventHook    = myEventHook,
+-        logHook            = myLogHook,
+-        startupHook        = myStartupHook
+-    }
+diff --git a/source/tests/Properties.hs b/source/tests/Properties.hs
+deleted file mode 100644
+index ae3f2e7..0000000
+--- a/source/tests/Properties.hs
++++ /dev/null
+@@ -1,1191 +0,0 @@
+-{-# OPTIONS -fglasgow-exts -w #-}
+-module Properties where
+-
+-import XMonad.StackSet hiding (filter)
+-import XMonad.Layout
+-import XMonad.Core hiding (workspaces,trace)
+-import XMonad.Operations  ( applyResizeIncHint, applyMaxSizeHint )
+-import qualified XMonad.StackSet as S (filter)
+-
+-import Debug.Trace
+-import Data.Word
+-import Graphics.X11.Xlib.Types (Rectangle(..),Position,Dimension)
+-import Data.Ratio
+-import Data.Maybe
+-import System.Environment
+-import Control.Exception    (assert)
+-import qualified Control.Exception.Extensible as C
+-import Control.Monad
+-import Test.QuickCheck hiding (promote)
+-import System.IO.Unsafe
+-import System.IO
+-import System.Random hiding (next)
+-import Text.Printf
+-import Data.List            (nub,sort,sortBy,group,sort,intersperse,genericLength)
+-import qualified Data.List as L
+-import Data.Char            (ord)
+-import Data.Map             (keys,elems)
+-import qualified Data.Map as M
+-
+--- ---------------------------------------------------------------------
+--- QuickCheck properties for the StackSet
+-
+--- Some general hints for creating StackSet properties:
+---
+--- *  ops that mutate the StackSet are usually local
+--- *  most ops on StackSet should either be trivially reversible, or
+---    idempotent, or both.
+-
+---
+--- The all important Arbitrary instance for StackSet.
+---
+-instance (Integral i, Integral s, Eq a, Arbitrary a, Arbitrary l, Arbitrary sd)
+-        => Arbitrary (StackSet i l a s sd) where
+-    arbitrary = do
+-        sz <- choose (1,10)     -- number of workspaces
+-        n  <- choose (0,sz-1)   -- pick one to be in focus
+-        sc  <- choose (1,sz)     -- a number of physical screens
+-        lay <- arbitrary           -- pick any layout
+-        sds <- replicateM sc arbitrary
+-        ls <- vector sz         -- a vector of sz workspaces
+-
+-        -- pick a random item in each stack to focus
+-        fs <- sequence [ if null s then return Nothing
+-                            else liftM Just (choose ((-1),length s-1))
+-                       | s <- ls ]
+-
+-        return $ fromList (fromIntegral n, sds,fs,ls,lay)
+-
+-
+--- | fromList. Build a new StackSet from a list of list of elements,
+--- keeping track of the currently focused workspace, and the total
+--- number of workspaces. If there are duplicates in the list, the last
+--- occurence wins.
+---
+--- 'o' random workspace
+--- 'm' number of physical screens
+--- 'fs' random focused window on each workspace
+--- 'xs' list of list of windows
+---
+-fromList :: (Integral i, Integral s, Eq a) => (i, [sd], [Maybe Int], [[a]], l) -> StackSet i l a s sd
+-fromList (_,_,_,[],_) = error "Cannot build a StackSet from an empty list"
+-
+-fromList (o,m,fs,xs,l) =
+-    let s = view o $
+-                foldr (\(i,ys) s ->
+-                    foldr insertUp (view i s) ys)
+-                        (new l [0..genericLength xs-1] m) (zip [0..] xs)
+-    in foldr (\f t -> case f of
+-                            Nothing -> t
+-                            Just i  -> foldr (const focusUp) t [0..i] ) s fs
+-
+-------------------------------------------------------------------------
+-
+---
+--- Just generate StackSets with Char elements.
+---
+-type T = StackSet (NonNegative Int) Int Char Int Int
+-
+--- Useful operation, the non-local workspaces
+-hidden_spaces x = map workspace (visible x) ++ hidden x
+-
+--- Basic data invariants of the StackSet
+---
+--- With the new zipper-based StackSet, tracking focus is no longer an
+--- issue: the data structure enforces focus by construction.
+---
+--- But we still need to ensure there are no duplicates, and master/and
+--- the xinerama mapping aren't checked by the data structure at all.
+---
+--- * no element should ever appear more than once in a StackSet
+--- * the xinerama screen map should be:
+---          -- keys should always index valid workspaces
+---          -- monotonically ascending in the elements
+--- * the current workspace should be a member of the xinerama screens
+---
+-invariant (s :: T) = and
+-    -- no duplicates
+-    [ noDuplicates
+-
+-    -- all this xinerama stuff says we don't have the right structure
+---  , validScreens
+---  , validWorkspaces
+---  , inBounds
+-    ]
+-
+-  where
+-    ws = concat [ focus t : up t ++ down t
+-                  | w <- workspace (current s) : map workspace (visible s) ++ hidden s
+-                  , t <- maybeToList (stack w)] :: [Char]
+-    noDuplicates = nub ws == ws
+-
+---  validScreens = monotonic . sort . M. . (W.current s : W.visible : W$ s
+-
+---  validWorkspaces = and [ w `elem` allworkspaces | w <- (M.keys . screens) s ]
+---          where allworkspaces = map tag $ current s : prev s ++ next s
+-
+---  inBounds  = and [ w >=0 && w < size s | (w,sc) <- M.assocs (screens s) ]
+-
+-monotonic []       = True
+-monotonic (x:[])   = True
+-monotonic (x:y:zs) | x == y-1  = monotonic (y:zs)
+-                   | otherwise = False
+-
+-prop_invariant = invariant
+-
+--- and check other ops preserve invariants
+-prop_empty_I  (n :: Positive Int) l = forAll (choose (1,fromIntegral n)) $  \m ->
+-                                      forAll (vector m) $ \ms ->
+-        invariant $ new l [0..fromIntegral n-1] ms
+-
+-prop_view_I (n :: NonNegative Int) (x :: T) =
+-    invariant $ view (fromIntegral n) x
+-
+-prop_greedyView_I (n :: NonNegative Int) (x :: T) =
+-    invariant $ greedyView (fromIntegral n) x
+-
+-prop_focusUp_I (n :: NonNegative Int) (x :: T) =
+-    invariant $ foldr (const focusUp) x [1..n]
+-prop_focusMaster_I (n :: NonNegative Int) (x :: T) =
+-    invariant $ foldr (const focusMaster) x [1..n]
+-prop_focusDown_I (n :: NonNegative Int) (x :: T) =
+-    invariant $ foldr (const focusDown) x [1..n]
+-
+-prop_focus_I (n :: NonNegative Int) (x :: T) =
+-    case peek x of
+-        Nothing -> True
+-        Just _  -> let w = focus . fromJust . stack . workspace . current $ foldr (const focusUp) x [1..n]
+-                   in invariant $ focusWindow w x
+-
+-prop_insertUp_I n (x :: T) = invariant $ insertUp n x
+-
+-prop_delete_I (x :: T) = invariant $
+-    case peek x of
+-        Nothing -> x
+-        Just i  -> delete i x
+-
+-prop_swap_master_I (x :: T) = invariant $ swapMaster x
+-
+-prop_swap_left_I  (n :: NonNegative Int) (x :: T) =
+-    invariant $ foldr (const swapUp ) x [1..n]
+-prop_swap_right_I (n :: NonNegative Int) (x :: T) =
+-    invariant $ foldr (const swapDown) x [1..n]
+-
+-prop_shift_I (n :: NonNegative Int) (x :: T) =
+-    n `tagMember` x ==> invariant $ shift (fromIntegral n) x
+-
+-prop_shift_win_I (n :: NonNegative Int) (w :: Char) (x :: T) =
+-    n `tagMember` x && w `member` x ==> invariant $ shiftWin (fromIntegral n) w x
+-
+-
+--- ---------------------------------------------------------------------
+--- 'new'
+-
+--- empty StackSets have no windows in them
+-prop_empty (EmptyStackSet x) =
+-        all (== Nothing) [ stack w | w <- workspace (current x)
+-                                        : map workspace (visible x) ++ hidden x ]
+-
+--- empty StackSets always have focus on first workspace
+-prop_empty_current (NonEmptyNubList ns) (NonEmptyNubList sds) l =
+-    -- TODO, this is ugly
+-    length sds <= length ns ==>
+-    tag (workspace $ current x) == head ns
+-    where x = new l ns sds :: T
+-
+--- no windows will be a member of an empty workspace
+-prop_member_empty i (EmptyStackSet x)
+-    = member i x == False
+-
+--- ---------------------------------------------------------------------
+--- viewing workspaces
+-
+--- view sets the current workspace to 'n'
+-prop_view_current (x :: T) (n :: NonNegative Int) = i `tagMember` x ==>
+-    tag (workspace $ current (view i x)) == i
+-  where
+-    i = fromIntegral n
+-
+--- view *only* sets the current workspace, and touches Xinerama.
+--- no workspace contents will be changed.
+-prop_view_local  (x :: T) (n :: NonNegative Int) = i `tagMember` x ==>
+-    workspaces x == workspaces (view i x)
+-  where
+-    workspaces a = sortBy (\s t -> tag s `compare` tag t) $
+-                                    workspace (current a)
+-                                    : map workspace (visible a) ++ hidden a
+-    i = fromIntegral n
+-
+--- view should result in a visible xinerama screen
+--- prop_view_xinerama (x :: T) (n :: NonNegative Int) = i `tagMember` x ==>
+---     M.member i (screens (view i x))
+---   where
+---     i = fromIntegral n
+-
+--- view is idempotent
+-prop_view_idem (x :: T) (i :: NonNegative Int) = i `tagMember` x ==> view i (view i x) == (view i x)
+-
+--- view is reversible, though shuffles the order of hidden/visible
+-prop_view_reversible (i :: NonNegative Int) (x :: T) =
+-    i `tagMember` x ==> normal (view n (view i x)) == normal x
+-    where n  = tag (workspace $ current x)
+-
+--- ---------------------------------------------------------------------
+--- greedyViewing workspaces
+-
+--- greedyView sets the current workspace to 'n'
+-prop_greedyView_current (x :: T) (n :: NonNegative Int) = i `tagMember` x ==>
+-    tag (workspace $ current (greedyView i x)) == i
+-  where
+-    i = fromIntegral n
+-
+--- greedyView leaves things unchanged for invalid workspaces
+-prop_greedyView_current_id (x :: T) (n :: NonNegative Int) = not (i `tagMember` x) ==>
+-    tag (workspace $ current (greedyView i x)) == j
+-  where
+-    i = fromIntegral n
+-    j = tag (workspace (current x))
+-
+--- greedyView *only* sets the current workspace, and touches Xinerama.
+--- no workspace contents will be changed.
+-prop_greedyView_local  (x :: T) (n :: NonNegative Int) = i `tagMember` x ==>
+-    workspaces x == workspaces (greedyView i x)
+-  where
+-    workspaces a = sortBy (\s t -> tag s `compare` tag t) $
+-                                    workspace (current a)
+-                                    : map workspace (visible a) ++ hidden a
+-    i = fromIntegral n
+-
+--- greedyView is idempotent
+-prop_greedyView_idem (x :: T) (i :: NonNegative Int) = i `tagMember` x ==> greedyView i (greedyView i x) == (greedyView i x)
+-
+--- greedyView is reversible, though shuffles the order of hidden/visible
+-prop_greedyView_reversible (i :: NonNegative Int) (x :: T) =
+-    i `tagMember` x ==> normal (greedyView n (greedyView i x)) == normal x
+-    where n  = tag (workspace $ current x)
+-
+--- normalise workspace list
+-normal s = s { hidden = sortBy g (hidden s), visible = sortBy f (visible s) }
+-    where
+-        f = \a b -> tag (workspace a) `compare` tag (workspace b)
+-        g = \a b -> tag a `compare` tag b
+-
+--- ---------------------------------------------------------------------
+--- Xinerama
+-
+--- every screen should yield a valid workspace
+--- prop_lookupWorkspace (n :: NonNegative Int) (x :: T) =
+---       s < M.size (screens x) ==>
+---       fromJust (lookupWorkspace s x) `elem` (map tag $ current x : prev x ++ next x)
+---     where
+---        s = fromIntegral n
+-
+--- ---------------------------------------------------------------------
+--- peek/index
+-
+--- peek either yields nothing on the Empty workspace, or Just a valid window
+-prop_member_peek (x :: T) =
+-    case peek x of
+-        Nothing -> True {- then we don't know anything -}
+-        Just i  -> member i x
+-
+--- ---------------------------------------------------------------------
+--- index
+-
+--- the list returned by index should be the same length as the actual
+--- windows kept in the zipper
+-prop_index_length (x :: T) =
+-    case stack . workspace . current $ x of
+-        Nothing   -> length (index x) == 0
+-        Just it -> length (index x) == length (focus it : up it ++ down it)
+-
+--- ---------------------------------------------------------------------
+--- rotating focus
+---
+-
+--- master/focus
+---
+--- The tiling order, and master window, of a stack is unaffected by focus changes.
+---
+-prop_focus_left_master (n :: NonNegative Int) (x::T) =
+-    index (foldr (const focusUp) x [1..n]) == index x
+-prop_focus_right_master (n :: NonNegative Int) (x::T) =
+-    index (foldr (const focusDown) x [1..n]) == index x
+-prop_focus_master_master (n :: NonNegative Int) (x::T) =
+-    index (foldr (const focusMaster) x [1..n]) == index x
+-
+-prop_focusWindow_master (n :: NonNegative Int) (x :: T) =
+-    case peek x of
+-        Nothing -> True
+-        Just _  -> let s = index x
+-                       i = fromIntegral n `mod` length s
+-                   in index (focusWindow (s !! i) x) == index x
+-
+--- shifting focus is trivially reversible
+-prop_focus_left  (x :: T) = (focusUp  (focusDown x)) == x
+-prop_focus_right (x :: T) = (focusDown (focusUp  x)) ==  x
+-
+--- focus master is idempotent
+-prop_focusMaster_idem (x :: T) = focusMaster x == focusMaster (focusMaster x)
+-
+--- focusWindow actually leaves the window focused...
+-prop_focusWindow_works (n :: NonNegative Int) (x :: T) =
+-    case peek x of
+-        Nothing -> True
+-        Just _  -> let s = index x
+-                       i = fromIntegral n `mod` length s
+-                   in (focus . fromJust . stack . workspace . current) (focusWindow (s !! i) x) == (s !! i)
+-
+--- rotation through the height of a stack gets us back to the start
+-prop_focus_all_l (x :: T) = (foldr (const focusUp) x [1..n]) == x
+-  where n = length (index x)
+-prop_focus_all_r (x :: T) = (foldr (const focusDown) x [1..n]) == x
+-  where n = length (index x)
+-
+--- prop_rotate_all (x :: T) = f (f x) == f x
+---     f x' = foldr (\_ y -> rotate GT y) x' [1..n]
+-
+--- focus is local to the current workspace
+-prop_focus_down_local (x :: T) = hidden_spaces (focusDown x) == hidden_spaces x
+-prop_focus_up_local (x :: T) = hidden_spaces (focusUp x) == hidden_spaces x
+-
+-prop_focus_master_local (x :: T) = hidden_spaces (focusMaster x) == hidden_spaces x
+-
+-prop_focusWindow_local (n :: NonNegative Int) (x::T ) =
+-    case peek x of
+-        Nothing -> True
+-        Just _  -> let s = index x
+-                       i = fromIntegral n `mod` length s
+-                   in hidden_spaces (focusWindow (s !! i) x) == hidden_spaces x
+-
+--- On an invalid window, the stackset is unmodified
+-prop_focusWindow_identity (n :: Char) (x::T ) =
+-    not (n `member` x) ==> focusWindow n x == x
+-
+--- ---------------------------------------------------------------------
+--- member/findTag
+-
+---
+--- For all windows in the stackSet, findTag should identify the
+--- correct workspace
+---
+-prop_findIndex (x :: T) =
+-    and [ tag w == fromJust (findTag i x)
+-        | w <- workspace (current x) : map workspace (visible x)  ++ hidden x
+-        , t <- maybeToList (stack w)
+-        , i <- focus t : up t ++ down t
+-        ]
+-
+-prop_allWindowsMember w (x :: T) = (w `elem` allWindows x) ==> member w x
+-
+-prop_currentTag (x :: T) =
+-    currentTag x == tag (workspace (current x))
+-
+--- ---------------------------------------------------------------------
+--- 'insert'
+-
+--- inserting a item into an empty stackset means that item is now a member
+-prop_insert_empty i (EmptyStackSet x)= member i (insertUp i x)
+-
+--- insert should be idempotent
+-prop_insert_idem i (x :: T) = insertUp i x == insertUp i (insertUp i x)
+-
+--- insert when an item is a member should leave the stackset unchanged
+-prop_insert_duplicate i (x :: T) = member i x ==> insertUp i x == x
+-
+--- push shouldn't change anything but the current workspace
+-prop_insert_local (x :: T) i = not (member i x) ==> hidden_spaces x == hidden_spaces (insertUp i x)
+-
+--- Inserting a (unique) list of items into an empty stackset should
+--- result in the last inserted element having focus.
+-prop_insert_peek (EmptyStackSet x) (NonEmptyNubList is) =
+-    peek (foldr insertUp x is) == Just (head is)
+-
+--- insert >> delete is the identity, when i `notElem` .
+--- Except for the 'master', which is reset on insert and delete.
+---
+-prop_insert_delete n x = not (member n x) ==> delete n (insertUp n y) == (y :: T)
+-    where
+-        y = swapMaster x -- sets the master window to the current focus.
+-                         -- otherwise, we don't have a rule for where master goes.
+-
+--- inserting n elements increases current stack size by n
+-prop_size_insert is (EmptyStackSet x) =
+-        size (foldr insertUp x ws ) ==  (length ws)
+-  where
+-    ws   = nub is
+-    size = length . index
+-
+-
+--- ---------------------------------------------------------------------
+--- 'delete'
+-
+--- deleting the current item removes it.
+-prop_delete x =
+-    case peek x of
+-        Nothing -> True
+-        Just i  -> not (member i (delete i x))
+-    where _ = x :: T
+-
+--- delete is reversible with 'insert'.
+--- It is the identiy, except for the 'master', which is reset on insert and delete.
+---
+-prop_delete_insert (x :: T) =
+-    case peek x of
+-        Nothing -> True
+-        Just n  -> insertUp n (delete n y) == y
+-    where
+-        y = swapMaster x
+-
+--- delete should be local
+-prop_delete_local (x :: T) =
+-    case peek x of
+-        Nothing -> True
+-        Just i  -> hidden_spaces x == hidden_spaces (delete i x)
+-
+--- delete should not affect focus unless the focused element is what is being deleted
+-prop_delete_focus n (x :: T) = member n x && Just n /= peek x ==> peek (delete n x) == peek x
+-
+--- focus movement in the presence of delete:
+--- when the last window in the stack set is focused, focus moves `up'.
+--- usual case is that it moves 'down'.
+-prop_delete_focus_end (x :: T) =
+-    length (index x) > 1
+-   ==>
+-    peek (delete n y) == peek (focusUp y)
+-  where
+-    n = last (index x)
+-    y = focusWindow n x -- focus last window in stack
+-
+--- focus movement in the presence of delete:
+--- when not in the last item in the stack, focus moves down
+-prop_delete_focus_not_end (x :: T) =
+-    length (index x) > 1 &&
+-    n /= last (index x)
+-   ==>
+-    peek (delete n x) == peek (focusDown x)
+-  where
+-    Just n = peek x
+-
+--- ---------------------------------------------------------------------
+--- filter
+-
+--- preserve order
+-prop_filter_order (x :: T) =
+-    case stack $ workspace $ current x of
+-        Nothing -> True
+-        Just s@(Stack i _ _) -> integrate' (S.filter (/= i) s) == filter (/= i) (integrate' (Just s))
+-
+--- ---------------------------------------------------------------------
+--- swapUp, swapDown, swapMaster: reordiring windows
+-
+--- swap is trivially reversible
+-prop_swap_left  (x :: T) = (swapUp  (swapDown x)) == x
+-prop_swap_right (x :: T) = (swapDown (swapUp  x)) ==  x
+--- TODO swap is reversible
+--- swap is reversible, but involves moving focus back the window with
+--- master on it. easy to do with a mouse...
+-{-
+-prop_promote_reversible x b = (not . null . fromMaybe [] . flip index x . current $ x) ==>
+-                            (raiseFocus y . promote . raiseFocus z . promote) x == x
+-  where _            = x :: T
+-        dir          = if b then LT else GT
+-        (Just y)     = peek x
+-        (Just (z:_)) = flip index x . current $ x
+--}
+-
+--- swap doesn't change focus
+-prop_swap_master_focus (x :: T) = peek x == (peek $ swapMaster x)
+---    = case peek x of
+---        Nothing -> True
+---        Just f  -> focus (stack (workspace $ current (swap x))) == f
+-prop_swap_left_focus   (x :: T) = peek x == (peek $ swapUp   x)
+-prop_swap_right_focus  (x :: T) = peek x == (peek $ swapDown  x)
+-
+--- swap is local
+-prop_swap_master_local (x :: T) = hidden_spaces x == hidden_spaces (swapMaster x)
+-prop_swap_left_local   (x :: T) = hidden_spaces x == hidden_spaces (swapUp   x)
+-prop_swap_right_local  (x :: T) = hidden_spaces x == hidden_spaces (swapDown  x)
+-
+--- rotation through the height of a stack gets us back to the start
+-prop_swap_all_l (x :: T) = (foldr (const swapUp)  x [1..n]) == x
+-  where n = length (index x)
+-prop_swap_all_r (x :: T) = (foldr (const swapDown) x [1..n]) == x
+-  where n = length (index x)
+-
+-prop_swap_master_idempotent (x :: T) = swapMaster (swapMaster x) == swapMaster x
+-
+--- ---------------------------------------------------------------------
+--- shift
+-
+--- shift is fully reversible on current window, when focus and master
+--- are the same. otherwise, master may move.
+-prop_shift_reversible i (x :: T) =
+-    i `tagMember` x ==> case peek y of
+-                          Nothing -> True
+-                          Just _  -> normal ((view n . shift n . view i . shift i) y) == normal y
+-    where
+-        y = swapMaster x
+-        n = tag (workspace $ current y)
+-
+-------------------------------------------------------------------------
+--- shiftMaster
+-
+--- focus/local/idempotent same as swapMaster:
+-prop_shift_master_focus (x :: T) = peek x == (peek $ shiftMaster x)
+-prop_shift_master_local (x :: T) = hidden_spaces x == hidden_spaces (shiftMaster x)
+-prop_shift_master_idempotent (x :: T) = shiftMaster (shiftMaster x) == shiftMaster x
+--- ordering is constant modulo the focused window:
+-prop_shift_master_ordering (x :: T) = case peek x of
+-    Nothing -> True
+-    Just m  -> L.delete m (index x) == L.delete m (index $ shiftMaster x)
+-
+--- ---------------------------------------------------------------------
+--- shiftWin
+-
+--- shiftWin on current window is the same as shift
+-prop_shift_win_focus i (x :: T) =
+-    i `tagMember` x ==> case peek x of
+-                          Nothing -> True
+-                          Just w  -> shiftWin i w x == shift i x
+-
+--- shiftWin on a non-existant window is identity
+-prop_shift_win_indentity i w (x :: T) =
+-    i `tagMember` x && not (w  `member` x) ==> shiftWin i w x == x
+-
+--- shiftWin leaves the current screen as it is, if neither i is the tag
+--- of the current workspace nor w on the current workspace
+-prop_shift_win_fix_current i w (x :: T) =
+-    i `tagMember` x && w `member` x && i /= n && findTag w x /= Just n
+-        ==> (current $ x) == (current $ shiftWin i w x)
+-    where
+-        n = tag (workspace $ current x)
+-
+-------------------------------------------------------------------------
+--- properties for the floating layer:
+-
+-prop_float_reversible n (x :: T) =
+-    n `member` x ==> sink n (float n geom x) == x
+-        where
+-            geom = RationalRect 100 100 100 100
+-
+-prop_float_geometry n (x :: T) =
+-    n `member` x ==> let s = float n geom x
+-                     in M.lookup n (floating s) == Just geom
+-        where
+-            geom = RationalRect 100 100 100 100
+-
+-prop_float_delete n (x :: T) =
+-    n `member` x ==> let s = float n geom x
+-                         t = delete n s
+-                     in not (n `member` t)
+-        where
+-            geom = RationalRect 100 100 100 100
+-
+-
+-------------------------------------------------------------------------
+-
+-prop_screens (x :: T) = n `elem` screens x
+- where
+-    n = current x
+-
+-prop_differentiate xs =
+-        if null xs then differentiate xs == Nothing
+-                   else (differentiate xs) == Just (Stack (head xs) [] (tail xs))
+-    where _ = xs :: [Int]
+-
+--- looking up the tag of the current workspace should always produce a tag.
+-prop_lookup_current (x :: T) = lookupWorkspace scr x == Just tg
+-    where
+-        (Screen (Workspace tg  _ _) scr _) = current x
+-
+--- looking at a visible tag
+-prop_lookup_visible (x :: T) =
+-        visible x /= [] ==>
+-        fromJust (lookupWorkspace scr x) `elem` tags
+-    where
+-        tags = [ tag (workspace y) | y <- visible x ]
+-        scr = last [ screen y | y <- visible x ]
+-
+-
+--- ---------------------------------------------------------------------
+--- testing for failure
+-
+--- and help out hpc
+-prop_abort x = unsafePerformIO $ C.catch (abort "fail")
+-                                         (\(C.SomeException e) -> return $  show e == "xmonad: StackSet: fail" )
+-   where
+-     _ = x :: Int
+-
+--- new should fail with an abort
+-prop_new_abort x = unsafePerformIO $ C.catch f
+-                                         (\(C.SomeException e) -> return $ show e == "xmonad: StackSet: non-positive argument to StackSet.new" )
+-   where
+-     f = new undefined{-layout-} [] [] `seq` return False
+-
+-     _ = x :: Int
+-
+--- prop_view_should_fail = view {- with some bogus data -}
+-
+--- screens makes sense
+-prop_screens_works (x :: T) = screens x == current x : visible x
+-
+-------------------------------------------------------------------------
+--- renaming tags
+-
+--- | Rename a given tag if present in the StackSet.
+--- 408 renameTag :: Eq i => i -> i -> StackSet i l a s sd -> StackSet i l a s sd
+-
+-prop_rename1 (x::T) o n = o `tagMember` x && not (n `tagMember` x) ==>
+-    let y = renameTag o n x
+-            in n `tagMember` y
+-
+--- | 
+--- Ensure that a given set of workspace tags is present by renaming
+--- existing workspaces and\/or creating new hidden workspaces as
+--- necessary.
+---
+-prop_ensure (x :: T) l xs = let y = ensureTags l xs x
+-                                in and [ n `tagMember` y | n <- xs ]
+-
+--- adding a tag should create a new hidden workspace
+-prop_ensure_append (x :: T) l n =
+-    not (n  `tagMember` x)
+-      ==>
+-   (hidden y /= hidden x        -- doesn't append, renames
+-   &&
+-   and [ isNothing (stack z) && layout z == l | z <- hidden y, tag z == n ]
+-   )
+-  where
+-    y  = ensureTags l (n:ts) x
+-    ts = [ tag z | z <- workspaces x ]
+-
+-prop_mapWorkspaceId (x::T) = x == mapWorkspace id x
+-
+-prop_mapWorkspaceInverse (x::T) = x == mapWorkspace predTag (mapWorkspace succTag x)
+-  where predTag w = w { tag = pred $ tag w }
+-        succTag w = w { tag = succ $ tag w }
+-
+-prop_mapLayoutId (x::T) = x == mapLayout id x
+-
+-prop_mapLayoutInverse (x::T) = x == mapLayout pred (mapLayout succ x)
+-
+-------------------------------------------------------------------------
+--- The Tall layout
+-
+--- 1 window should always be tiled fullscreen
+-prop_tile_fullscreen rect = tile pct rect 1 1 == [rect]
+-    where pct = 1/2
+-
+--- multiple windows
+-prop_tile_non_overlap rect windows nmaster = noOverlaps (tile pct rect nmaster windows)
+-  where _ = rect :: Rectangle
+-        pct = 3 % 100
+-
+--- splitting horizontally yields sensible results
+-prop_split_hoziontal (NonNegative n) x =
+-{-
+-    trace (show (rect_x x
+-                ,rect_width x
+-                ,rect_x x + fromIntegral (rect_width x)
+-                ,map rect_x xs))
+-          $
+--}
+-
+-        sum (map rect_width xs) == rect_width x
+-     &&
+-        all (== rect_height x) (map rect_height xs)
+-     &&
+-        (map rect_x xs) == (sort $ map rect_x xs)
+-
+-    where
+-        xs = splitHorizontally n x
+-
+--- splitting horizontally yields sensible results
+-prop_splitVertically (r :: Rational) x =
+-
+-        rect_x x == rect_x a && rect_x x == rect_x b
+-      &&
+-        rect_width x == rect_width a && rect_width x == rect_width b
+-
+-{-
+-    trace (show (rect_x x
+-                ,rect_width x
+-                ,rect_x x + fromIntegral (rect_width x)
+-                ,map rect_x xs))
+-          $
+--}
+-
+-    where
+-        (a,b) = splitVerticallyBy r x
+-
+-
+--- pureLayout works.
+-prop_purelayout_tall n r1 r2 rect (t :: T) =
+-    isJust (peek t) ==>
+-        length ts == length (index t)
+-      &&
+-        noOverlaps (map snd ts)
+-      &&
+-        description layoot == "Tall"
+-    where layoot = Tall n r1 r2
+-          st = fromJust . stack . workspace . current $ t
+-          ts = pureLayout layoot rect st
+-
+--- Test message handling of Tall
+-
+--- what happens when we send a Shrink message to Tall
+-prop_shrink_tall (NonNegative n) (NonZero (NonNegative delta)) (NonNegative frac) =
+-        n == n' && delta == delta' -- these state components are unchanged
+-    && frac' <= frac  && (if frac' < frac then frac' == 0 || frac' == frac - delta
+-                                          else frac == 0 )
+-        -- remaining fraction should shrink
+-    where
+-         l1                   = Tall n delta frac
+-         Just l2@(Tall n' delta' frac') = l1 `pureMessage` (SomeMessage Shrink)
+-        --  pureMessage :: layout a -> SomeMessage -> Maybe (layout a)
+-
+-
+--- what happens when we send a Shrink message to Tall
+-prop_expand_tall (NonNegative n)
+-                 (NonZero (NonNegative delta))
+-                 (NonNegative n1)
+-                 (NonZero (NonNegative d1)) =
+-
+-       n == n'
+-    && delta == delta' -- these state components are unchanged
+-    && frac' >= frac
+-    && (if frac' > frac
+-           then frac' == 1 || frac' == frac + delta
+-           else frac == 1 )
+-
+-        -- remaining fraction should shrink
+-    where
+-         frac                 = min 1 (n1 % d1)
+-         l1                   = Tall n delta frac
+-         Just l2@(Tall n' delta' frac') = l1 `pureMessage` (SomeMessage Expand)
+-        --  pureMessage :: layout a -> SomeMessage -> Maybe (layout a)
+-
+--- what happens when we send an IncMaster message to Tall
+-prop_incmaster_tall (NonNegative n) (NonZero (NonNegative delta)) (NonNegative frac)
+-                    (NonNegative k) =
+-       delta == delta'  && frac == frac' && n' == n + k
+-    where
+-         l1                   = Tall n delta frac
+-         Just l2@(Tall n' delta' frac') = l1 `pureMessage` (SomeMessage (IncMasterN k))
+-        --  pureMessage :: layout a -> SomeMessage -> Maybe (layout a)
+-
+-
+-
+-     --   toMessage LT = SomeMessage Shrink
+-     --   toMessage EQ = SomeMessage Expand
+-     --   toMessage GT = SomeMessage (IncMasterN 1)
+-
+-
+-------------------------------------------------------------------------
+--- Full layout
+-
+--- pureLayout works for Full
+-prop_purelayout_full rect (t :: T) =
+-    isJust (peek t) ==>
+-        length ts == 1        -- only one window to view
+-      &&
+-        snd (head ts) == rect -- and sets fullscreen
+-      &&
+-        fst (head ts) == fromJust (peek t) -- and the focused window is shown
+-
+-    where layoot = Full
+-          st = fromJust . stack . workspace . current $ t
+-          ts = pureLayout layoot rect st
+-
+--- what happens when we send an IncMaster message to Full --- Nothing
+-prop_sendmsg_full (NonNegative k) =
+-         isNothing (Full `pureMessage` (SomeMessage (IncMasterN k)))
+-
+-prop_desc_full = description Full == show Full
+-
+-------------------------------------------------------------------------
+-
+-prop_desc_mirror n r1 r2 = description (Mirror $! t) == "Mirror Tall"
+-    where t = Tall n r1 r2
+-
+-------------------------------------------------------------------------
+-
+-noOverlaps []  = True
+-noOverlaps [_] = True
+-noOverlaps xs  = and [ verts a `notOverlap` verts b
+-                     | a <- xs
+-                     , b <- filter (a /=) xs
+-                     ]
+-    where
+-      verts (Rectangle a b w h) = (a,b,a + fromIntegral w - 1, b + fromIntegral h - 1)
+-
+-      notOverlap (left1,bottom1,right1,top1)
+-                 (left2,bottom2,right2,top2)
+-        =  (top1 < bottom2 || top2 < bottom1)
+-        || (right1 < left2 || right2 < left1)
+-
+-------------------------------------------------------------------------
+--- Aspect ratios
+-
+-prop_resize_inc (NonZero (NonNegative inc_w),NonZero (NonNegative inc_h))  b@(w,h) =
+-    w' `mod` inc_w == 0 && h' `mod` inc_h == 0
+-   where (w',h') = applyResizeIncHint a b
+-         a = (inc_w,inc_h)
+-
+-prop_resize_inc_extra ((NonNegative inc_w))  b@(w,h) =
+-     (w,h) == (w',h')
+-   where (w',h') = applyResizeIncHint a b
+-         a = (-inc_w,0::Dimension)-- inc_h)
+-
+-prop_resize_max (NonZero (NonNegative inc_w),NonZero (NonNegative inc_h))  b@(w,h) =
+-    w' <= inc_w && h' <= inc_h
+-   where (w',h') = applyMaxSizeHint a b
+-         a = (inc_w,inc_h)
+-
+-prop_resize_max_extra ((NonNegative inc_w))  b@(w,h) =
+-     (w,h) == (w',h')
+-   where (w',h') = applyMaxSizeHint a b
+-         a = (-inc_w,0::Dimension)-- inc_h)
+-
+-------------------------------------------------------------------------
+-
+-main :: IO ()
+-main = do
+-    args <- fmap (drop 1) getArgs
+-    let n = if null args then 100 else read (head args)
+-    (results, passed) <- liftM unzip $ mapM (\(s,a) -> printf "%-40s: " s >> a n) tests
+-    printf "Passed %d tests!\n" (sum passed)
+-    when (not . and $ results) $ fail "Not all tests passed!"
+- where
+-
+-    tests =
+-        [("StackSet invariants" , mytest prop_invariant)
+-
+-        ,("empty: invariant"    , mytest prop_empty_I)
+-        ,("empty is empty"      , mytest prop_empty)
+-        ,("empty / current"     , mytest prop_empty_current)
+-        ,("empty / member"      , mytest prop_member_empty)
+-
+-        ,("view : invariant"    , mytest prop_view_I)
+-        ,("view sets current"   , mytest prop_view_current)
+-        ,("view idempotent"     , mytest prop_view_idem)
+-        ,("view reversible"    , mytest prop_view_reversible)
+---      ,("view / xinerama"     , mytest prop_view_xinerama)
+-        ,("view is local"       , mytest prop_view_local)
+-
+-        ,("greedyView : invariant"    , mytest prop_greedyView_I)
+-        ,("greedyView sets current"   , mytest prop_greedyView_current)
+-        ,("greedyView is safe "   ,   mytest prop_greedyView_current_id)
+-        ,("greedyView idempotent"     , mytest prop_greedyView_idem)
+-        ,("greedyView reversible"     , mytest prop_greedyView_reversible)
+-        ,("greedyView is local"       , mytest prop_greedyView_local)
+---
+---      ,("valid workspace xinerama", mytest prop_lookupWorkspace)
+-
+-        ,("peek/member "        , mytest prop_member_peek)
+-
+-        ,("index/length"        , mytest prop_index_length)
+-
+-        ,("focus left : invariant", mytest prop_focusUp_I)
+-        ,("focus master : invariant", mytest prop_focusMaster_I)
+-        ,("focus right: invariant", mytest prop_focusDown_I)
+-        ,("focusWindow: invariant", mytest prop_focus_I)
+-        ,("focus left/master"   , mytest prop_focus_left_master)
+-        ,("focus right/master"  , mytest prop_focus_right_master)
+-        ,("focus master/master"  , mytest prop_focus_master_master)
+-        ,("focusWindow master"  , mytest prop_focusWindow_master)
+-        ,("focus left/right"    , mytest prop_focus_left)
+-        ,("focus right/left"    , mytest prop_focus_right)
+-        ,("focus all left  "    , mytest prop_focus_all_l)
+-        ,("focus all right "    , mytest prop_focus_all_r)
+-        ,("focus down is local"      , mytest prop_focus_down_local)
+-        ,("focus up is local"      , mytest prop_focus_up_local)
+-        ,("focus master is local"      , mytest prop_focus_master_local)
+-        ,("focus master idemp"  , mytest prop_focusMaster_idem)
+-
+-        ,("focusWindow is local", mytest prop_focusWindow_local)
+-        ,("focusWindow works"   , mytest prop_focusWindow_works)
+-        ,("focusWindow identity", mytest prop_focusWindow_identity)
+-
+-        ,("findTag"           , mytest prop_findIndex)
+-        ,("allWindows/member"   , mytest prop_allWindowsMember)
+-        ,("currentTag"          , mytest prop_currentTag)
+-
+-        ,("insert: invariant"   , mytest prop_insertUp_I)
+-        ,("insert/new"          , mytest prop_insert_empty)
+-        ,("insert is idempotent", mytest prop_insert_idem)
+-        ,("insert is reversible", mytest prop_insert_delete)
+-        ,("insert is local"     , mytest prop_insert_local)
+-        ,("insert duplicates"   , mytest prop_insert_duplicate)
+-        ,("insert/peek "        , mytest prop_insert_peek)
+-        ,("insert/size"         , mytest prop_size_insert)
+-
+-        ,("delete: invariant"   , mytest prop_delete_I)
+-        ,("delete/empty"        , mytest prop_empty)
+-        ,("delete/member"       , mytest prop_delete)
+-        ,("delete is reversible", mytest prop_delete_insert)
+-        ,("delete is local"     , mytest prop_delete_local)
+-        ,("delete/focus"        , mytest prop_delete_focus)
+-        ,("delete  last/focus up", mytest prop_delete_focus_end)
+-        ,("delete ~last/focus down", mytest prop_delete_focus_not_end)
+-
+-        ,("filter preserves order", mytest prop_filter_order)
+-
+-        ,("swapMaster: invariant", mytest prop_swap_master_I)
+-        ,("swapUp: invariant" , mytest prop_swap_left_I)
+-        ,("swapDown: invariant", mytest prop_swap_right_I)
+-        ,("swapMaster id on focus", mytest prop_swap_master_focus)
+-        ,("swapUp id on focus", mytest prop_swap_left_focus)
+-        ,("swapDown id on focus", mytest prop_swap_right_focus)
+-        ,("swapMaster is idempotent", mytest prop_swap_master_idempotent)
+-        ,("swap all left  "     , mytest prop_swap_all_l)
+-        ,("swap all right "     , mytest prop_swap_all_r)
+-        ,("swapMaster is local" , mytest prop_swap_master_local)
+-        ,("swapUp is local"   , mytest prop_swap_left_local)
+-        ,("swapDown is local"  , mytest prop_swap_right_local)
+-
+-        ,("shiftMaster id on focus", mytest prop_shift_master_focus)
+-        ,("shiftMaster is local", mytest prop_shift_master_local)
+-        ,("shiftMaster is idempotent", mytest prop_shift_master_idempotent)
+-        ,("shiftMaster preserves ordering", mytest prop_shift_master_ordering)
+-
+-        ,("shift: invariant"    , mytest prop_shift_I)
+-        ,("shift is reversible" , mytest prop_shift_reversible)
+-        ,("shiftWin: invariant" , mytest prop_shift_win_I)
+-        ,("shiftWin is shift on focus" , mytest prop_shift_win_focus)
+-        ,("shiftWin fix current" , mytest prop_shift_win_fix_current)
+-
+-        ,("floating is reversible" , mytest prop_float_reversible)
+-        ,("floating sets geometry" , mytest prop_float_geometry)
+-        ,("floats can be deleted", mytest prop_float_delete)
+-        ,("screens includes current", mytest prop_screens)
+-
+-        ,("differentiate works", mytest prop_differentiate)
+-        ,("lookupTagOnScreen", mytest prop_lookup_current)
+-        ,("lookupTagOnVisbleScreen", mytest prop_lookup_visible)
+-        ,("screens works",      mytest prop_screens_works)
+-        ,("renaming works",     mytest prop_rename1)
+-        ,("ensure works",     mytest prop_ensure)
+-        ,("ensure hidden semantics",     mytest prop_ensure_append)
+-
+-        ,("mapWorkspace id", mytest prop_mapWorkspaceId)
+-        ,("mapWorkspace inverse", mytest prop_mapWorkspaceInverse)
+-        ,("mapLayout id", mytest prop_mapLayoutId)
+-        ,("mapLayout inverse", mytest prop_mapLayoutInverse)
+-
+-        -- testing for failure:
+-        ,("abort fails",            mytest prop_abort)
+-        ,("new fails with abort",   mytest prop_new_abort)
+-        ,("shiftWin identity",      mytest prop_shift_win_indentity)
+-
+-        -- tall layout
+-
+-        ,("tile 1 window fullsize", mytest prop_tile_fullscreen)
+-        ,("tiles never overlap",    mytest prop_tile_non_overlap)
+-        ,("split hozizontally",     mytest prop_split_hoziontal)
+-        ,("split verticalBy",       mytest prop_splitVertically)
+-
+-        ,("pure layout tall",       mytest prop_purelayout_tall)
+-        ,("send shrink    tall",    mytest prop_shrink_tall)
+-        ,("send expand    tall",    mytest prop_expand_tall)
+-        ,("send incmaster tall",    mytest prop_incmaster_tall)
+-
+-        -- full layout
+-
+-        ,("pure layout full",       mytest prop_purelayout_full)
+-        ,("send message full",      mytest prop_sendmsg_full)
+-        ,("describe full",          mytest prop_desc_full)
+-
+-        ,("describe mirror",        mytest prop_desc_mirror)
+-
+-        -- resize hints
+-        ,("window hints: inc",      mytest prop_resize_inc)
+-        ,("window hints: inc all",  mytest prop_resize_inc_extra)
+-        ,("window hints: max",      mytest prop_resize_max)
+-        ,("window hints: max all ", mytest prop_resize_max_extra)
+-
+-        ]
+-
+-------------------------------------------------------------------------
+---
+--- QC driver
+---
+-
+-debug = False
+-
+-mytest :: Testable a => a -> Int -> IO (Bool, Int)
+-mytest a n = mycheck defaultConfig
+-    { configMaxTest=n
+-    , configEvery   = \n args -> let s = show n in s ++ [ '\b' | _ <- s ] } a
+- -- , configEvery= \n args -> if debug then show n ++ ":\n" ++ unlines args else [] } a
+-
+-mycheck :: Testable a => Config -> a -> IO (Bool, Int)
+-mycheck config a = do
+-    rnd <- newStdGen
+-    mytests config (evaluate a) rnd 0 0 []
+-
+-mytests :: Config -> Gen Result -> StdGen -> Int -> Int -> [[String]] -> IO (Bool, Int)
+-mytests config gen rnd0 ntest nfail stamps
+-    | ntest == configMaxTest config = done "OK," ntest stamps >> return (True, ntest)
+-    | nfail == configMaxFail config = done "Arguments exhausted after" ntest stamps >> return (True, ntest)
+-    | otherwise               =
+-      do putStr (configEvery config ntest (arguments result)) >> hFlush stdout
+-         case ok result of
+-           Nothing    ->
+-             mytests config gen rnd1 ntest (nfail+1) stamps
+-           Just True  ->
+-             mytests config gen rnd1 (ntest+1) nfail (stamp result:stamps)
+-           Just False ->
+-             putStr ( "Falsifiable after "
+-                   ++ show ntest
+-                   ++ " tests:\n"
+-                   ++ unlines (arguments result)
+-                    ) >> hFlush stdout >> return (False, ntest)
+-     where
+-      result      = generate (configSize config ntest) rnd2 gen
+-      (rnd1,rnd2) = split rnd0
+-
+-done :: String -> Int -> [[String]] -> IO ()
+-done mesg ntest stamps = putStr ( mesg ++ " " ++ show ntest ++ " tests" ++ table )
+-  where
+-    table = display
+-            . map entry
+-            . reverse
+-            . sort
+-            . map pairLength
+-            . group
+-            . sort
+-            . filter (not . null)
+-            $ stamps
+-
+-    display []  = ".\n"
+-    display [x] = " (" ++ x ++ ").\n"
+-    display xs  = ".\n" ++ unlines (map (++ ".") xs)
+-
+-    pairLength xss@(xs:_) = (length xss, xs)
+-    entry (n, xs)         = percentage n ntest
+-                       ++ " "
+-                       ++ concat (intersperse ", " xs)
+-
+-    percentage n m        = show ((100 * n) `div` m) ++ "%"
+-
+-------------------------------------------------------------------------
+-
+-instance Arbitrary Char where
+-    arbitrary = choose ('a','z')
+-    coarbitrary n = coarbitrary (ord n)
+-
+-instance Random Word8 where
+-  randomR = integralRandomR
+-  random = randomR (minBound,maxBound)
+-
+-instance Arbitrary Word8 where
+-  arbitrary     = choose (minBound,maxBound)
+-  coarbitrary n = variant (fromIntegral ((fromIntegral n) `rem` 4))
+-
+-instance Random Word64 where
+-  randomR = integralRandomR
+-  random = randomR (minBound,maxBound)
+-
+-instance Arbitrary Word64 where
+-  arbitrary     = choose (minBound,maxBound)
+-  coarbitrary n = variant (fromIntegral ((fromIntegral n) `rem` 4))
+-
+-integralRandomR :: (Integral a, RandomGen g) => (a,a) -> g -> (a,g)
+-integralRandomR  (a,b) g = case randomR (fromIntegral a :: Integer,
+-                                         fromIntegral b :: Integer) g of
+-                            (x,g) -> (fromIntegral x, g)
+-
+-instance Arbitrary Position  where
+-    arbitrary = do n <- arbitrary :: Gen Word8
+-                   return (fromIntegral n)
+-    coarbitrary = undefined
+-
+-instance Arbitrary Dimension where
+-    arbitrary = do n <- arbitrary :: Gen Word8
+-                   return (fromIntegral n)
+-    coarbitrary = undefined
+-
+-instance Arbitrary Rectangle where
+-    arbitrary = do
+-        sx <- arbitrary
+-        sy <- arbitrary
+-        sw <- arbitrary
+-        sh <- arbitrary
+-        return $ Rectangle sx sy sw sh
+-    coarbitrary = undefined
+-
+-instance Arbitrary Rational where
+-    arbitrary = do
+-        n <- arbitrary
+-        d' <- arbitrary
+-        let d =  if d' == 0 then 1 else d'
+-        return (n % d)
+-    coarbitrary = undefined
+-
+-------------------------------------------------------------------------
+--- QC 2
+-
+--- from QC2
+--- | NonEmpty xs: guarantees that xs is non-empty.
+-newtype NonEmptyList a = NonEmpty [a]
+- deriving ( Eq, Ord, Show, Read )
+-
+-instance Arbitrary a => Arbitrary (NonEmptyList a) where
+-  arbitrary   = NonEmpty `fmap` (arbitrary `suchThat` (not . null))
+-  coarbitrary = undefined
+-
+-newtype NonEmptyNubList a = NonEmptyNubList [a]
+- deriving ( Eq, Ord, Show, Read )
+-
+-instance (Eq a, Arbitrary a) => Arbitrary (NonEmptyNubList a) where
+-  arbitrary   = NonEmptyNubList `fmap` ((liftM nub arbitrary) `suchThat` (not . null))
+-  coarbitrary = undefined
+-
+-type Positive a = NonZero (NonNegative a)
+-
+-newtype NonZero a = NonZero a
+- deriving ( Eq, Ord, Num, Integral, Real, Enum, Show, Read )
+-
+-instance (Num a, Ord a, Arbitrary a) => Arbitrary (NonZero a) where
+-  arbitrary = fmap NonZero $ arbitrary `suchThat` (/= 0)
+-  coarbitrary = undefined
+-
+-newtype NonNegative a = NonNegative a
+- deriving ( Eq, Ord, Num, Integral, Real, Enum, Show, Read )
+-
+-instance (Num a, Ord a, Arbitrary a) => Arbitrary (NonNegative a) where
+-  arbitrary =
+-    frequency
+-      [ (5, (NonNegative . abs) `fmap` arbitrary)
+-      , (1, return 0)
+-      ]
+-  coarbitrary = undefined
+-
+-newtype EmptyStackSet = EmptyStackSet T deriving Show
+-
+-instance Arbitrary EmptyStackSet where
+-    arbitrary = do
+-        (NonEmptyNubList ns)  <- arbitrary
+-        (NonEmptyNubList sds) <- arbitrary
+-        l <- arbitrary
+-        -- there cannot be more screens than workspaces:
+-        return . EmptyStackSet . new l ns $ take (min (length ns) (length sds)) sds
+-    coarbitrary = error "coarbitrary EmptyStackSet"
+-
+--- | Generates a value that satisfies a predicate.
+-suchThat :: Gen a -> (a -> Bool) -> Gen a
+-gen `suchThat` p =
+-  do mx <- gen `suchThatMaybe` p
+-     case mx of
+-       Just x  -> return x
+-       Nothing -> sized (\n -> resize (n+1) (gen `suchThat` p))
+-
+--- | Tries to generate a value that satisfies a predicate.
+-suchThatMaybe :: Gen a -> (a -> Bool) -> Gen (Maybe a)
+-gen `suchThatMaybe` p = sized (try 0 . max 1)
+- where
+-  try _ 0 = return Nothing
+-  try k n = do x <- resize (2*k+n) gen
+-               if p x then return (Just x) else try (k+1) (n-1)
+diff --git a/source/tests/coverage.hs b/source/tests/coverage.hs
+deleted file mode 100644
+index 3600951..0000000
+--- a/source/tests/coverage.hs
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#!/usr/bin/env runhaskell
+-
+-import System.Cmd
+-
+--- generate appropriate .hpc files
+-main = do
+-    system $ "rm -rf *.tix"
+-    system $ "dist/build/xmonad/xmonad --run-tests"
+-    system $ "hpc markup xmonad --exclude=Main --exclude=Properties --exclude=XMonad --exclude=Paths_xmonad"
+-    system $ "hpc report xmonad --exclude=Main --exclude=Properties --exclude=XMonad --exclude=Paths_xmonad"
+diff --git a/source/tests/loc.hs b/source/tests/loc.hs
+deleted file mode 100644
+index 238204a..0000000
+--- a/source/tests/loc.hs
++++ /dev/null
+@@ -1,14 +0,0 @@
+-import Control.Monad
+-import System.Exit
+-
+-main = do foo <- getContents
+-          let actual_loc = filter (not.null) $ filter isntcomment $
+-                           map (dropWhile (==' ')) $ lines foo
+-              loc = length actual_loc
+-          print loc
+-          -- uncomment the following to check for mistakes in isntcomment
+-          -- print actual_loc
+-
+-isntcomment ('-':'-':_) = False
+-isntcomment ('{':'-':_) = False -- pragmas
+-isntcomment _ = True
+diff --git a/source/util/GenerateManpage.hs b/source/util/GenerateManpage.hs
+deleted file mode 100644
+index 8e69af3..0000000
+--- a/source/util/GenerateManpage.hs
++++ /dev/null
+@@ -1,99 +0,0 @@
+--- Unlike the rest of xmonad, this file is copyright under the terms of the
+--- GPL.
+-
+---
+--- Generates man/xmonad.1 from man/xmonad.1.in by filling the list of
+--- keybindings with values scraped from Config.hs
+---
+--- Uses cabal to grab the xmonad version from xmonad.cabal
+---
+--- Uses pandoc to convert the "xmonad.1.markdown" to "xmonad.1"
+---
+--- Format for the docstrings in Config.hs takes the following form:
+---
+--- -- mod-x %! Frob the whatsit
+--- 
+--- "Frob the whatsit" will be used as the description for keybinding "mod-x"
+---
+--- If the keybinding name is omitted, it will try to guess from the rest of the
+--- line. For example:
+---
+--- [ ((modMask .|. shiftMask, xK_Return), spawn "xterm") -- %! Launch an xterm
+---
+--- Here, mod-shift-return will be used as the keybinding name.
+-import Control.Monad
+-import Control.Applicative
+-import Text.Regex.Posix
+-import Data.Char
+-import Data.List
+-
+-import Distribution.PackageDescription.Parse
+-import Distribution.Verbosity
+-import Distribution.Package
+-import Distribution.PackageDescription
+-import Text.PrettyPrint.HughesPJ
+-import Distribution.Text
+-
+-import Text.Pandoc -- works with 1.6
+-
+-releaseDate = "31 December 2012"
+-
+-trim :: String -> String
+-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
+-
+-guessKeys line = concat $ intersperse "-" (modifiers ++ [map toLower key])
+-    where modifiers = map (!!1) (line =~ "(mod|shift|control)Mask")
+-          (_, _, _, [key]) = line =~ "xK_(\\w+)" :: (String, String, String, [String])
+-
+-binding :: [String] -> (String, String)
+-binding [ _, bindingLine, "", desc ] = (guessKeys bindingLine, desc)
+-binding [ _, _, keyCombo, desc ] = (keyCombo, desc)
+-
+-allBindings :: String -> [(String, String)]
+-allBindings xs = map (binding . map trim) (xs =~ "(.*)--(.*)%!(.*)")
+-
+--- FIXME: What escaping should we be doing on these strings?
+-markdownDefn :: (String, String) -> String
+-markdownDefn (key, desc) = key ++ "\n:     " ++ desc
+-
+-replace :: Eq a => a -> a -> [a] -> [a]
+-replace x y = map (\a -> if a == x then y else a)
+-
+--- rawSystem "pandoc" ["--read=markdown","--write=man","man/xmonad.1.markdown"]
+-
+-main = do
+-    releaseName <- (show . disp . package . packageDescription)
+-                    `liftM`readPackageDescription normal "xmonad.cabal"
+-    keybindings <- (intercalate "\n\n" . map markdownDefn . allBindings)
+-                    `liftM` readFile "./XMonad/Config.hs"
+-
+-    let manHeader = unwords [".TH xmonad 1","\""++releaseDate++"\"",releaseName,"\"xmonad manual\""]
+-        writeOpts = defaultWriterOptions -- { writerLiterateHaskell = True }
+-
+-    parsed <- readMarkdown defaultParserState { stateLiterateHaskell = True }
+-        . unlines
+-        . replace "___KEYBINDINGS___" keybindings
+-        . lines
+-        <$> readFile "./man/xmonad.1.markdown"
+-
+-    Right template <- getDefaultTemplate Nothing "man"
+-    writeFile "./man/xmonad.1"
+-        . (manHeader ++)
+-        . writeMan writeOpts{ writerStandalone = True, writerTemplate = template }
+-        $ parsed
+-    putStrLn "Documentation created: man/xmonad.1"
+-
+-    Right template <- getDefaultTemplate Nothing "html"
+-    writeFile "./man/xmonad.1.html"
+-        . writeHtmlString writeOpts
+-            { writerVariables =
+-                        [("include-before"
+-                            ,"<h1>"++releaseName++"</h1>"++
+-                             "<p>Section: xmonad manual (1)<br/>"++
+-                             "Updated: "++releaseDate++"</p>"++
+-                             "<hr/>")]
+-            , writerStandalone = True
+-            , writerTemplate = template
+-            , writerTableOfContents = True }
+-        $ parsed
+-    putStrLn "Documentation created: man/xmonad.1.html"

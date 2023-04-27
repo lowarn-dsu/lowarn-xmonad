@@ -1,0 +1,33 @@
+name:                lowarn-update-xmonad-v1441-v1442
+version:             1.0.0
+github:              "lowarn-dsu/lowarn"
+license:             MIT
+author:              "Jonathan Watson"
+# maintainer:
+copyright:           "2023 Jonathan Watson"
+
+dependencies:
+- base >= 4.7 && < 5
+- lowarn
+- lowarn-transformer
+- name: lowarn-version-xmonad-v1441
+  mixin:
+  - (XMonad as PreviousVersion.XMonad, XMonad.LowarnState as PreviousVersion.LowarnState)
+- name: lowarn-version-xmonad-v1442
+  mixin:
+  - (XMonad as NextVersion.XMonad, XMonad.LowarnState as NextVersion.LowarnState, EntryPoint_xmonad as NextVersion.EntryPoint)
+- containers
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+
+library:
+  source-dirs: src
